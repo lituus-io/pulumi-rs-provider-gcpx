@@ -13,14 +13,6 @@ repository = "https://github.com/lituus-io/pulumi-rs-provider-gcpx"
 resolver = "2"
 members = [
     "crates/gcpx-core",
-    "crates/gcpx-bq",
-    "crates/gcpx-dbt",
-    "crates/gcpx-scheduler",
-    "crates/gcpx-snapshot",
-    "crates/gcpx-dataproc",
-    "crates/gcpx-agents",
-    "crates/gcpx-provider",
-    "crates/pulumi-resource-gcpx",
 ]
 
 [workspace.dependencies]
@@ -81,9 +73,9 @@ panic = "abort"
 debug = 0
 overflow-checks = false
 
-# Benchmarks and fuzz targets cannot link against `panic = "abort"`.
+# Benchmarks keep symbols so profilers can attribute samples. Cargo already
+# forces unwind here regardless of the release profile's `panic = "abort"`.
 [profile.bench]
 inherits = "release"
-panic = "unwind"
 debug = 1
 strip = "none"

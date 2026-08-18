@@ -21,7 +21,7 @@
 //! Each of those is also a Pulumi dependency edge, so an agent cannot be
 //! published before the data it claims to describe exists.
 
-use crate::types::{GlossaryTerm, SchemaRelationship, TableRef, UserFunction};
+use crate::types::{GlossaryTerm, TableRef};
 
 /// Parse a `project.dataset.table` reference, with or without backticks.
 ///
@@ -89,63 +89,6 @@ where
         .collect()
 }
 
-/// Derive join relationships from a model's declared refs.
-///
-/// The join column is inferred from the referenced model's name (`stg_users` →
-/// `user_id`), which is the dbt convention and right often enough to be worth
-/// offering. It is a hint, not a constraint: an explicit relationship declared
-/// on the resource always wins.
-pub fn relationships_from_refs<'a>(
-    model_table: &'a str,
-    referenced: &[(&'a str, &'a str)],
-) -> Vec<SchemaRelationship<'a>> {
-    referenced
-        .iter()
-        .filter_map(|(name, table)| {
-            let key = singular_key(name)?;
-            Some(SchemaRelationship {
-                left_table: model_table,
-                left_column: key.0,
-                right_table: table,
-                right_column: key.1,
-                relationship_type: "many_to_one",
-            })
-        })
-        .collect()
-}
-
-/// `stg_users` → (`user_id`, `user_id`). Returns `None` when no convention applies.
-fn singular_key(model_name: &str) -> Option<(&'static str, &'static str)> {
-    // Deliberately conservative: only the unambiguous, conventional cases, so a
-    // wrong guess never ends up in an agent's context.
-    let bare = model_name
-        .trim_start_matches("stg_")
-        .trim_start_matches("dim_")
-        .trim_start_matches("fct_")
-        .trim_start_matches("int_");
-    match bare {
-        "users" | "user" => Some(("user_id", "user_id")),
-        "customers" | "customer" => Some(("customer_id", "customer_id")),
-        "orders" | "order" => Some(("order_id", "order_id")),
-        "products" | "product" => Some(("product_id", "product_id")),
-        "accounts" | "account" => Some(("account_id", "account_id")),
-        _ => None,
-    }
-}
-
-/// Turn a BigQuery routine into a function the agent may call.
-pub fn user_function<'a>(
-    name: &'a str,
-    description: &'a str,
-    signature: &'a str,
-) -> UserFunction<'a> {
-    UserFunction {
-        name,
-        description,
-        signature,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,47 +142,5 @@ mod tests {
         ]);
         assert_eq!(terms.len(), 1);
         assert_eq!(terms[0].term, "arr");
-    }
-
-    #[test]
-    fn relationships_follow_the_naming_convention_where_it_is_unambiguous() {
-        let rels = relationships_from_refs(
-            "p.d.fct_orders",
-            &[
-                ("stg_users", "p.d.stg_users"),
-                ("stg_orders", "p.d.stg_orders"),
-            ],
-        );
-        let users = rels
-            .iter()
-            .find(|r| r.right_table == "p.d.stg_users")
-            .unwrap();
-        assert_eq!(users.left_column, "user_id");
-        assert_eq!(users.relationship_type, "many_to_one");
-    }
-
-    #[test]
-    fn unrecognised_model_names_produce_no_relationship() {
-        // A wrong guess in an agent's context is worse than no guess: it makes
-        // the agent join on a column that may not exist.
-        let rels = relationships_from_refs("p.d.x", &[("weekly_rollup", "p.d.weekly_rollup")]);
-        assert!(rels.is_empty());
-    }
-
-    #[test]
-    fn conventional_prefixes_are_stripped_before_matching() {
-        for name in [
-            "stg_users",
-            "dim_users",
-            "fct_users",
-            "int_users",
-            "users",
-            "user",
-        ] {
-            assert!(
-                singular_key(name).is_some(),
-                "{name} should match the convention"
-            );
-        }
     }
 }

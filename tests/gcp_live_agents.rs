@@ -103,8 +103,6 @@ fn inputs<'a>(
             options: AgentOptions::default(),
             example_queries: vec![],
             glossary_terms: vec![],
-            schema_relationships: vec![],
-            user_functions: vec![],
         },
         publish,
     }

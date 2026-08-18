@@ -1,0 +1,144 @@
+# Copyright: lituus-io, all rights reserved.
+# Author: terekete <spicyzhug@gmail.com>
+#
+# A data agent grounded on a model this stack builds.
+#
+# The point of the example is the wiring, not the SQL: the agent's datasource is
+# `${dailyRevenue.modelOutput}`, not a table name typed out by hand. That makes
+# the grounding a dependency edge, so the agent cannot be published before the
+# table it describes exists — and if the model moves, the agent follows.
+
+name: gcpx-agent-quickstart
+runtime: yaml
+description: A BigQuery dataset, a dbt model, and a data agent grounded on it.
+
+config:
+  gcpProject:
+    type: string
+  location:
+    type: string
+    default: northamerica-northeast1
+
+resources:
+  analytics:
+    type: gcpx:bigquery/dataset:Dataset
+    properties:
+      project: ${gcpProject}
+      datasetId: gcpx_quickstart
+      location: ${location}
+      description: Quickstart dataset for the gcpx agent example.
+      # Without this, destroying the stack fails: BigQuery refuses to drop a
+      # dataset that still holds the tables the models below create.
+      deleteContentsOnDestroy: true
+
+  rawOrders:
+    type: gcpx:bigquery/table:Table
+    properties:
+      project: ${gcpProject}
+      dataset: ${analytics.datasetId}
+      tableId: raw_orders
+
+  rawOrdersSchema:
+    type: gcpx:bigquery/tableSchema:TableSchema
+    properties:
+      project: ${gcpProject}
+      dataset: ${analytics.datasetId}
+      tableId: ${rawOrders.tableId}
+      schema:
+        - name: order_id
+          type: INT64
+          description: Unique identifier for the order.
+        - name: region
+          type: STRING
+          description: Sales region the order was placed in.
+        - name: amount_cents
+          type: INT64
+          description: Order total in cents, before tax.
+        - name: ordered_at
+          type: TIMESTAMP
+          description: When the order was placed.
+
+  dbtProject:
+    type: gcpx:dbt/project:Project
+    properties:
+      gcpProject: ${gcpProject}
+      dataset: ${analytics.datasetId}
+      # Sources are declared once here; models refer to them by name, so the
+      # dataset a source lives in is stated in exactly one place.
+      sources:
+        raw:
+          dataset: ${analytics.datasetId}
+          tables:
+            - raw_orders
+      declaredModels:
+        - daily_revenue
+      declaredMacros:
+        - cents_to_dollars
+
+  # A macro is a resource, so its definition flows to every model that uses it.
+  #
+  # The body is read from a file rather than written inline.
+  #
+  # The YAML runtime renders Jinja over this file before the provider sees any
+  # of it, and by default an unknown name is an error. A dbt template written
+  # directly here therefore fails at load time, naming the template rather than
+  # the real problem. That pass covers comments as well, so even mentioning the
+  # syntax in one breaks the file.
+  #
+  # fn::readFile is a plain file read and never passes through that stage, which
+  # is why every SQL body in this example is loaded that way. Inline templates
+  # can be made to work by setting PULUMI_YAML_JINJA_UNDEFINED=passthrough, but
+  # reading from a file is the more durable habit.
+  centsToDollars:
+    type: gcpx:dbt/macro:Macro
+    properties:
+      name: cents_to_dollars
+      args: [cents]
+      sql:
+        fn::readFile: sql/cents_to_dollars.sql
+
+  dailyRevenue:
+    type: gcpx:dbt/model:Model
+    properties:
+      name: daily_revenue
+      sql:
+        fn::readFile: sql/daily_revenue.sql
+      context: ${dbtProject.context}
+      macros:
+        cents_to_dollars: ${centsToDollars.macroOutput}
+    options:
+      dependsOn:
+        - ${rawOrdersSchema}
+
+  revenueAnalyst:
+    type: gcpx:agent/dataAgent:DataAgent
+    properties:
+      project: ${gcpProject}
+      location: global
+      agentId: gcpx-quickstart-analyst
+      displayName: Revenue analyst
+      description: Answers questions about daily revenue by region.
+      systemInstruction: >-
+        You are a revenue analyst. Answer questions about daily revenue using
+        the daily_revenue table. Amounts are already in dollars. When asked
+        about trends, aggregate by day and region.
+      # The grounding: a model output, not a hand-written table name.
+      models:
+        - ${dailyRevenue.modelOutput}
+      glossaryTerms:
+        - term: revenue
+          description: Sum of order amounts in dollars, excluding tax.
+      exampleQueries:
+        - question: What was revenue by region last week?
+          sql: >-
+            SELECT region, SUM(revenue) AS revenue FROM daily_revenue
+            WHERE day >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+            GROUP BY region
+      publish: true
+
+outputs:
+  datasetId: ${analytics.datasetId}
+  modelTable: ${dailyRevenue.modelOutput.tableRef}
+  agentName: ${revenueAnalyst.name}
+  groundedOn: ${revenueAnalyst.groundedTables}
+  agentPublished: ${revenueAnalyst.published}

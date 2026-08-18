@@ -1,0 +1,174 @@
+[
+  {
+    "timestamp": "2026-08-18T05:28:28.820223Z",
+    "systemMessage": {
+      "text": {
+        "parts": [
+          "Analyzing context",
+          "Retrieved context for 1 table."
+        ],
+        "textType": "THOUGHT"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-08-18T05:28:33.879409Z",
+    "systemMessage": {
+      "text": {
+        "parts": [
+          "Running a query",
+          "SELECT daily_revenue.region AS region,\n       SUM(daily_revenue.revenue) AS total_revenue\nFROM `example-project.gcpx_quickstart.daily_revenue` AS daily_revenue\nGROUP BY region\nORDER BY total_revenue DESC"
+        ],
+        "textType": "THOUGHT"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-08-18T05:28:34.966176Z",
+    "systemMessage": {
+      "text": {
+        "parts": [
+          "Query execution completed",
+          "Query returned 2 rows in 1.08s."
+        ],
+        "textType": "THOUGHT"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-08-18T05:28:39.766842Z",
+    "systemMessage": {
+      "text": {
+        "parts": [
+          "Here is the total revenue calculated for each region based on the daily revenue records."
+        ],
+        "textType": "FINAL_RESPONSE"
+      },
+      "citation": {
+        "sources": [
+          {
+            "id": "g_rev",
+            "title": "Glossary: revenue",
+            "glossaryTerm": {
+              "displayName": "revenue",
+              "description": "Sum of order amounts in dollars, excluding tax."
+            }
+          }
+        ],
+        "anchors": [
+          {
+            "textMessageAnchor": {
+              "startOffsetBytes": 18,
+              "endOffsetBytes": 25,
+              "sourceIds": [
+                "g_rev"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-08-18T05:28:39.767047Z",
+    "systemMessage": {
+      "data": {
+        "query": {
+          "datasources": [
+            {
+              "bigqueryTableReference": {
+                "projectId": "example-project",
+                "datasetId": "gcpx_quickstart",
+                "tableId": "daily_revenue"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2026-08-18T05:28:39.767215Z",
+    "systemMessage": {
+      "data": {
+        "generatedSql": "SELECT daily_revenue.region AS region,\n       SUM(daily_revenue.revenue) AS total_revenue\nFROM `example-project.gcpx_quickstart.daily_revenue` AS daily_revenue\nGROUP BY region\nORDER BY total_revenue DESC"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-08-18T05:28:39.767225Z",
+    "systemMessage": {
+      "data": {
+        "bigQueryJob": {
+          "projectId": "example-project",
+          "jobId": "job_PYq435-g4_fiwnHemQVM3YknpP34",
+          "destinationTable": {
+            "projectId": "example-project",
+            "datasetId": "_69c154414f8a516bc33b1e92d6729d5514902abf",
+            "tableId": "anon8d222361b2bcf1265712d403daf115364cabc4a86d2365152e7cd27a25d57389"
+          },
+          "location": "northamerica-northeast1",
+          "schema": {}
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2026-08-18T05:28:39.767717Z",
+    "systemMessage": {
+      "data": {
+        "result": {
+          "data": [
+            {
+              "total_revenue": 2149.5,
+              "region": "west"
+            },
+            {
+              "total_revenue": 450,
+              "region": "east"
+            }
+          ],
+          "name": "total_revenue_by_region",
+          "schema": {
+            "fields": [
+              {
+                "name": "region",
+                "type": "STRING",
+                "mode": "NULLABLE"
+              },
+              {
+                "name": "total_revenue",
+                "type": "FLOAT",
+                "mode": "NULLABLE"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2026-08-18T05:28:39.767891Z",
+    "systemMessage": {
+      "text": {
+        "parts": [
+          "### Revenue Insights\n\nThe **west** region generated significantly higher revenue than the **east** region, bringing in $2,149.50 compared to the east region's $450.00. This indicates that the west region is currently the primary driver of revenue."
+        ],
+        "textType": "FINAL_RESPONSE"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-08-18T05:28:39.767895Z",
+    "systemMessage": {
+      "text": {
+        "parts": [
+          "Show me the daily revenue trend for each region.",
+          "What is the total order count by region?",
+          "Compare the average revenue per order between regions."
+        ],
+        "textType": "FOLLOWUP_QUESTIONS"
+      }
+    }
+  }
+]

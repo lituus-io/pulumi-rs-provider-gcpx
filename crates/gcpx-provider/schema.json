@@ -446,59 +446,6 @@
         "description"
       ]
     },
-    "gcpx:agent/schemaRelationship:SchemaRelationship": {
-      "type": "object",
-      "description": "A join the agent should know about rather than having to guess.",
-      "properties": {
-        "leftTable": {
-          "type": "string",
-          "description": "Fully-qualified table on the left of the join."
-        },
-        "leftColumn": {
-          "type": "string",
-          "description": "Join column on the left table."
-        },
-        "rightTable": {
-          "type": "string",
-          "description": "Fully-qualified table on the right of the join."
-        },
-        "rightColumn": {
-          "type": "string",
-          "description": "Join column on the right table."
-        },
-        "relationshipType": {
-          "type": "string",
-          "description": "One of one_to_one, one_to_many, many_to_one, many_to_many."
-        }
-      },
-      "required": [
-        "leftTable",
-        "leftColumn",
-        "rightTable",
-        "rightColumn"
-      ]
-    },
-    "gcpx:agent/userFunction:UserFunction": {
-      "type": "object",
-      "description": "A BigQuery routine the agent may call. Wire this from a RoutineFunction output so the agent and the deployed UDF cannot drift apart.",
-      "properties": {
-        "name": {
-          "type": "string",
-          "description": "Function name as it appears in SQL."
-        },
-        "description": {
-          "type": "string",
-          "description": "What the function does."
-        },
-        "signature": {
-          "type": "string",
-          "description": "Argument and return types."
-        }
-      },
-      "required": [
-        "name"
-      ]
-    },
     "gcpx:agent/lookerExplore:LookerExplore": {
       "type": "object",
       "description": "A Looker explore the agent may query.",
@@ -1570,10 +1517,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Network tags for the Spark executors.",
-          "default": [
-            "spark"
-          ]
+          "description": "Network tags applied to the Spark batch. Defaults to [\"spark\"] when omitted; the provider applies that default, since Pulumi schemas may only carry constant defaults for scalar types."
         },
         "schedule": {
           "type": "string",
@@ -1820,10 +1764,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Network tags.",
-          "default": [
-            "spark"
-          ]
+          "description": "Network tags applied to the Spark batch. Defaults to [\"spark\"] when omitted; the provider applies that default, since Pulumi schemas may only carry constant defaults for scalar types."
         },
         "schedule": {
           "type": "string",
@@ -2058,23 +1999,7 @@
             "$ref": "#/types/gcpx:agent/glossaryTerm:GlossaryTerm",
             "description": ""
           },
-          "description": "Business terms the agent cannot infer from column names."
-        },
-        "schemaRelationships": {
-          "type": "array",
-          "items": {
-            "$ref": "#/types/gcpx:agent/schemaRelationship:SchemaRelationship",
-            "description": ""
-          },
-          "description": "Joins the agent should know about."
-        },
-        "userFunctions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/types/gcpx:agent/userFunction:UserFunction",
-            "description": ""
-          },
-          "description": "BigQuery routines the agent may call."
+          "description": "Business terms the agent cannot infer from column names. Each carries a displayName and a description."
         },
         "chartRendering": {
           "type": "string",
@@ -2167,22 +2092,6 @@
             "description": ""
           },
           "description": "Business terms the agent cannot infer from column names."
-        },
-        "schemaRelationships": {
-          "type": "array",
-          "items": {
-            "$ref": "#/types/gcpx:agent/schemaRelationship:SchemaRelationship",
-            "description": ""
-          },
-          "description": "Joins the agent should know about."
-        },
-        "userFunctions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/types/gcpx:agent/userFunction:UserFunction",
-            "description": ""
-          },
-          "description": "BigQuery routines the agent may call."
         },
         "chartRendering": {
           "type": "string",

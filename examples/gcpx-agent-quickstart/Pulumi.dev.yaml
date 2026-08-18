@@ -1,0 +1,6 @@
+# Copyright: lituus-io, all rights reserved.
+# Author: terekete <spicyzhug@gmail.com>
+config:
+  gcpx-agent-quickstart:location: northamerica-northeast1
+  gcpx-agent-quickstart:gcpProject: wb-mock-lab-b6ccc6
+encryptionsalt: v1:N3RPVv8gcC0=:v1:CUzMIjMtYkdYZiCG:1kg1pH3omXECKgQhkxsjAUxw6Q7LFQ==

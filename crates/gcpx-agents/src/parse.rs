@@ -73,8 +73,6 @@ fn parse_context(f: &Fields) -> AgentContext<'_> {
         },
         example_queries: parse_example_queries(f),
         glossary_terms: parse_glossary(f),
-        schema_relationships: parse_relationships(f),
-        user_functions: parse_user_functions(f),
     }
 }
 
@@ -157,44 +155,6 @@ fn parse_glossary(f: &Fields) -> Vec<GlossaryTerm<'_>> {
                         term: get_str(t, "term")?,
                         description: get_str(t, "description").unwrap_or(""),
                         synonyms: get_string_list(t, "synonyms"),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn parse_relationships(f: &Fields) -> Vec<SchemaRelationship<'_>> {
-    get_list(f, "schemaRelationships")
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(struct_fields)
-                .filter_map(|r| {
-                    Some(SchemaRelationship {
-                        left_table: get_str(r, "leftTable")?,
-                        left_column: get_str(r, "leftColumn")?,
-                        right_table: get_str(r, "rightTable")?,
-                        right_column: get_str(r, "rightColumn")?,
-                        relationship_type: get_str(r, "relationshipType").unwrap_or("many_to_one"),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn parse_user_functions(f: &Fields) -> Vec<UserFunction<'_>> {
-    get_list(f, "userFunctions")
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(struct_fields)
-                .filter_map(|u| {
-                    Some(UserFunction {
-                        name: get_str(u, "name")?,
-                        description: get_str(u, "description").unwrap_or(""),
-                        signature: get_str(u, "signature").unwrap_or(""),
                     })
                 })
                 .collect()
@@ -430,19 +390,11 @@ mod tests {
                     ("description", prost_string("annual recurring revenue")),
                 ])]),
             ),
-            (
-                "userFunctions",
-                prost_list(vec![obj(vec![
-                    ("name", prost_string("cents_to_dollars")),
-                    ("signature", prost_string("cents_to_dollars(INT64)")),
-                ])]),
-            ),
         ]);
         let a = parse_data_agent(&props).unwrap();
         assert_eq!(a.context.system_instruction, "You are an analyst.");
         assert_eq!(a.context.options.python_analysis, Some(true));
         assert_eq!(a.context.glossary_terms[0].term, "ARR");
-        assert_eq!(a.context.user_functions[0].name, "cents_to_dollars");
     }
 
     #[test]

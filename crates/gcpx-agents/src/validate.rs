@@ -63,20 +63,6 @@ pub fn validate_data_agent(inputs: &DataAgentInputs<'_>) -> Vec<CheckFailure> {
         }
     }
 
-    for (i, r) in inputs.context.schema_relationships.iter().enumerate() {
-        if !is_valid_relationship_type(r.relationship_type) {
-            failures.push(CheckFailure {
-                property: "schemaRelationships".into(),
-                reason: format!(
-                    "schemaRelationships[{i}] has relationshipType '{}'; expected one of \
-                     one_to_one, one_to_many, many_to_one, many_to_many",
-                    r.relationship_type
-                )
-                .into(),
-            });
-        }
-    }
-
     if let Some(chart) = inputs.context.options.chart_rendering {
         if !matches!(
             chart.to_ascii_lowercase().as_str(),
@@ -279,13 +265,6 @@ fn invalid_resource_id(id: &str) -> Option<String> {
     None
 }
 
-fn is_valid_relationship_type(t: &str) -> bool {
-    matches!(
-        t,
-        "one_to_one" | "one_to_many" | "many_to_one" | "many_to_many"
-    )
-}
-
 fn is_valid_iam_member(member: &str) -> bool {
     const PREFIXES: &[&str] = &[
         "user:",
@@ -364,8 +343,6 @@ mod tests {
                 options: AgentOptions::default(),
                 example_queries: vec![],
                 glossary_terms: vec![],
-                schema_relationships: vec![],
-                user_functions: vec![],
             },
             publish,
         }
@@ -432,20 +409,6 @@ mod tests {
         assert!(validate_data_agent(&a)
             .iter()
             .any(|f| f.property == "agentId"));
-    }
-
-    #[test]
-    fn relationship_types_are_constrained() {
-        let mut a = agent(false, one_table());
-        a.context.schema_relationships = vec![SchemaRelationship {
-            left_table: "a",
-            left_column: "b",
-            right_table: "c",
-            right_column: "d",
-            relationship_type: "sideways",
-        }];
-        let failures = validate_data_agent(&a);
-        assert!(failures.iter().any(|f| f.reason.contains("many_to_one")));
     }
 
     #[test]

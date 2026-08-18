@@ -76,25 +76,6 @@ pub struct GlossaryTerm<'a> {
     pub synonyms: Vec<&'a str>,
 }
 
-/// A join the agent should know about, so it does not have to guess.
-#[derive(Debug, Clone)]
-pub struct SchemaRelationship<'a> {
-    pub left_table: &'a str,
-    pub left_column: &'a str,
-    pub right_table: &'a str,
-    pub right_column: &'a str,
-    /// `one_to_one`, `one_to_many`, `many_to_one`, or `many_to_many`.
-    pub relationship_type: &'a str,
-}
-
-/// A BigQuery routine the agent may call.
-#[derive(Debug, Clone)]
-pub struct UserFunction<'a> {
-    pub name: &'a str,
-    pub description: &'a str,
-    pub signature: &'a str,
-}
-
 /// Behavioural switches for the agent.
 #[derive(Debug, Clone, Default)]
 pub struct AgentOptions<'a> {
@@ -120,8 +101,6 @@ pub struct AgentContext<'a> {
     pub options: AgentOptions<'a>,
     pub example_queries: Vec<ExampleQuery<'a>>,
     pub glossary_terms: Vec<GlossaryTerm<'a>>,
-    pub schema_relationships: Vec<SchemaRelationship<'a>>,
-    pub user_functions: Vec<UserFunction<'a>>,
 }
 
 #[derive(Debug, Clone)]

@@ -375,14 +375,21 @@ pub async fn check_dbt_model<C: BqOps>(
                         .dry_run_query(context.gcp_project, &select_sql, max_bytes_billed)
                         .await
                     {
-                        if !dry_run.valid {
+                        let message = dry_run.error_message.unwrap_or_default();
+                        // A dry run cannot tell "this SQL is wrong" apart from
+                        // "the tables do not exist yet" — and during the preview
+                        // of a first deploy they legitimately do not, because
+                        // this same stack is about to create them. Reporting
+                        // that as a validation failure makes every new stack
+                        // fail its own preview.
+                        //
+                        // So a not-found is left alone and a real SQL problem is
+                        // still reported, which is the case worth catching
+                        // before a deploy runs.
+                        if !dry_run.valid && !references_missing_objects(&message) {
                             failures.push(gcpx_core::resource::CheckFailure {
                                 property: "sql".into(),
-                                reason: format!(
-                                    "SQL dry-run validation failed: {}",
-                                    dry_run.error_message.unwrap_or_default()
-                                )
-                                .into(),
+                                reason: format!("SQL dry-run validation failed: {message}").into(),
                             });
                         }
                     }
@@ -392,6 +399,15 @@ pub async fn check_dbt_model<C: BqOps>(
     }
 
     build_check_response(req.news, failures)
+}
+
+/// Whether a dry-run rejection is only "these objects do not exist yet".
+///
+/// During the preview of a first deploy the tables a model reads are usually
+/// created by the same stack, so this is expected rather than a mistake.
+fn references_missing_objects(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    m.contains("not found") || m.contains("notfound") || m.contains("was not found in location")
 }
 
 pub async fn diff_dbt_model<C: BqOps>(
@@ -1344,6 +1360,39 @@ pub fn extract_model_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A model whose tables are created by the same stack must not fail its own
+    /// preview. Found by deploying the quickstart example: the dry run reported
+    /// "Dataset ... was not found", which is true and expected on a first run.
+    #[test]
+    fn missing_objects_are_not_treated_as_invalid_sql() {
+        for message in [
+            r#"{"error":{"code":404,"message":"Not found: Dataset p:ds was not found in location US"}}"#,
+            "Not found: Table p:ds.t",
+            "notFound",
+        ] {
+            assert!(
+                references_missing_objects(message),
+                "should be tolerated during preview: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn genuine_sql_errors_are_still_reported() {
+        // The case the dry run exists for: catching a broken query before a
+        // deploy runs it.
+        for message in [
+            "Syntax error: Unexpected identifier \"SELEC\" at [1:1]",
+            "Column x is not present in table y",
+            "Query exceeded limit for bytes billed",
+        ] {
+            assert!(
+                !references_missing_objects(message),
+                "should still fail validation: {message}"
+            );
+        }
+    }
     use gcpx_bq::mock::MockBqClient;
     use gcpx_core::prost_util::{prost_list, prost_string, prost_struct};
 

@@ -133,6 +133,9 @@ pub struct ChatOutcome {
     pub answer: String,
     /// Error text, when the agent reported one.
     pub error: Option<String>,
+    /// The agent's reasoning, kept separate from the answer. Useful when a
+    /// golden query fails and the question is why.
+    pub thoughts: Vec<String>,
 }
 
 impl ChatOutcome {
@@ -155,13 +158,33 @@ impl ChatOutcome {
                 }
             }
         }
-        for pointer in ["/systemMessage/text/parts", "/text/parts"] {
-            if let Some(parts) = value.pointer(pointer).and_then(|v| v.as_array()) {
-                for part in parts.iter().filter_map(|p| p.as_str()) {
-                    if !self.answer.is_empty() {
-                        self.answer.push(' ');
+        // The stream interleaves the agent's reasoning with its answer, and
+        // both arrive as `text.parts`. Only `textType` tells them apart, so
+        // without this check the answer is prefixed with thinking like
+        // "Analyzing context" — which then fails any assertion on its content.
+        let text_type = value
+            .pointer("/systemMessage/text/textType")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let is_answer = text_type.is_empty() || text_type == "FINAL_RESPONSE";
+        if is_answer {
+            for pointer in ["/systemMessage/text/parts", "/text/parts"] {
+                if let Some(parts) = value.pointer(pointer).and_then(|v| v.as_array()) {
+                    for part in parts.iter().filter_map(|p| p.as_str()) {
+                        if !self.answer.is_empty() {
+                            self.answer.push(' ');
+                        }
+                        self.answer.push_str(part);
                     }
-                    self.answer.push_str(part);
+                }
+            }
+        } else if text_type == "THOUGHT" {
+            if let Some(parts) = value
+                .pointer("/systemMessage/text/parts")
+                .and_then(|v| v.as_array())
+            {
+                for part in parts.iter().filter_map(|p| p.as_str()) {
+                    self.thoughts.push(part.to_owned());
                 }
             }
         }
@@ -195,9 +218,10 @@ pub fn build_chat_body(
     serde_json::json!({
         "parent": format!("projects/{project}/locations/{location}"),
         "messages": [{ "userMessage": { "text": question } }],
-        "conversationReference": {
-            "dataAgentContext": { "dataAgent": agent }
-        }
+        // Top level, not nested under `conversationReference` — nesting it is
+        // rejected with "Invalid resource field value in the request", which
+        // names neither the field nor the expected shape.
+        "dataAgentContext": { "dataAgent": agent }
     })
 }
 
@@ -366,7 +390,7 @@ mod tests {
         assert_eq!(body["parent"], "projects/p/locations/global");
         assert_eq!(body["messages"][0]["userMessage"]["text"], "hi");
         assert_eq!(
-            body["conversationReference"]["dataAgentContext"]["dataAgent"],
+            body["dataAgentContext"]["dataAgent"],
             "projects/p/locations/global/dataAgents/a"
         );
     }

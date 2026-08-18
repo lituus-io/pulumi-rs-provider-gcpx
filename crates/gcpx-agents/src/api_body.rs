@@ -124,48 +124,11 @@ pub fn build_context(ctx: &AgentContext<'_>) -> Value {
             Value::Array(
                 ctx.glossary_terms
                     .iter()
-                    .map(|t| {
-                        let mut term = json!({ "term": t.term, "description": t.description });
-                        if !t.synonyms.is_empty() {
-                            term["labels"] = json!(t.synonyms);
-                        }
-                        term
-                    })
+                    // The field is `displayName`; `term` is rejected. Verified
+                    // against the live API, not inferred from the reference.
+                    .map(|t| json!({ "displayName": t.term, "description": t.description }))
                     .collect(),
             ),
-        );
-    }
-
-    if !ctx.schema_relationships.is_empty() {
-        out.insert(
-            "schemaRelationships".into(),
-            Value::Array(
-                ctx.schema_relationships
-                    .iter()
-                    .map(|r| {
-                        json!({
-                            "leftTable": r.left_table,
-                            "leftColumn": r.left_column,
-                            "rightTable": r.right_table,
-                            "rightColumn": r.right_column,
-                            "relationshipType": r.relationship_type,
-                        })
-                    })
-                    .collect(),
-            ),
-        );
-    }
-
-    if !ctx.user_functions.is_empty() {
-        out.insert(
-            "userFunctions".into(),
-            json!({
-                "functions": ctx.user_functions.iter().map(|f| json!({
-                    "name": f.name,
-                    "description": f.description,
-                    "signature": f.signature,
-                })).collect::<Vec<_>>()
-            }),
         );
     }
 
@@ -255,8 +218,6 @@ mod tests {
             options: AgentOptions::default(),
             example_queries: vec![],
             glossary_terms: vec![],
-            schema_relationships: vec![],
-            user_functions: vec![],
         }
     }
 
@@ -339,8 +300,13 @@ mod tests {
             .is_none());
     }
 
+    /// The exact field names the live API accepts.
+    ///
+    /// Every one of these was verified against the real service rather than
+    /// read off the reference: the first attempt used `term` for a glossary
+    /// entry, which the API rejects, and it only surfaced on deploy.
     #[test]
-    fn context_carries_examples_glossary_relationships_and_functions() {
+    fn context_uses_the_field_names_the_api_accepts() {
         let mut i = inputs(true);
         i.context.example_queries = vec![ExampleQuery {
             question: "revenue?",
@@ -351,32 +317,38 @@ mod tests {
             description: "annual recurring revenue",
             synonyms: vec!["annual revenue"],
         }];
-        i.context.schema_relationships = vec![SchemaRelationship {
-            left_table: "p.d.orders",
-            left_column: "user_id",
-            right_table: "p.d.users",
-            right_column: "id",
-            relationship_type: "many_to_one",
-        }];
-        i.context.user_functions = vec![UserFunction {
-            name: "cents_to_dollars",
-            description: "converts cents",
-            signature: "cents_to_dollars(INT64) -> FLOAT64",
-        }];
+        i.context.options.chart_rendering = Some("svg");
+        i.context.options.python_analysis = Some(true);
+
         let c = &build_agent_body(&i)["dataAnalyticsAgent"]["stagingContext"];
         assert_eq!(
             c["exampleQueries"][0]["naturalLanguageQuestion"],
             "revenue?"
         );
-        assert_eq!(c["glossaryTerms"][0]["term"], "ARR");
-        assert_eq!(
-            c["schemaRelationships"][0]["relationshipType"],
-            "many_to_one"
+        assert_eq!(c["exampleQueries"][0]["sqlQuery"], "SELECT 1");
+        // `displayName`, not `term`: the API rejects `term` outright.
+        assert_eq!(c["glossaryTerms"][0]["displayName"], "ARR");
+        assert!(
+            c["glossaryTerms"][0].get("term").is_none(),
+            "`term` is not a field on this message"
         );
         assert_eq!(
-            c["userFunctions"]["functions"][0]["name"],
-            "cents_to_dollars"
+            c["glossaryTerms"][0]["description"],
+            "annual recurring revenue"
         );
+        assert!(c["options"]["chart"]["image"]["svg"].is_object());
+        assert_eq!(c["options"]["analysis"]["python"]["enabled"], true);
+    }
+
+    /// Two context fields were designed from the reference and then removed:
+    /// both message names exist, but no subfield spelling could be found that
+    /// the API accepts. Sending an unverified shape fails the deploy, so
+    /// nothing is sent until the shape is known.
+    #[test]
+    fn unverified_context_fields_are_not_sent() {
+        let c = &build_agent_body(&inputs(true))["dataAnalyticsAgent"]["stagingContext"];
+        assert!(c.get("schemaRelationships").is_none());
+        assert!(c.get("userFunctions").is_none());
     }
 
     #[test]

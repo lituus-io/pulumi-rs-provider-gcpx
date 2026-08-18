@@ -98,7 +98,25 @@ Found by the plugin's own tests:
   yet be wired into an agent as callable functions.
 - Dataproc resources are unverified against a live project; that API was not
   enabled where the rest was tested.
-- Inline dbt templates in a stack file are eaten by the YAML runtime's Jinja
-  pass. Passthrough mode protects `{{ expressions }}` but not
-  `{% statement tags %}`, so an inline incremental model fails in both modes.
-  Load SQL with `fn::readFile`, which never reaches that stage.
+
+### Template layering
+
+Two renderers see a stack and both use the same delimiters. The YAML runtime
+renders the stack file once, before any resource exists; this provider renders
+dbt templates in SQL afterwards, per resource. Three ways to keep them apart,
+in order of preference:
+
+1. **`fn::readFile`** — the builtin is a plain file read, so SQL loaded that way
+   never reaches the YAML renderer. Always works. Every example uses it.
+2. **`{% raw %}…{% endraw %}`** — Jinja's own escape, honoured by both layers.
+   Verified to work inline in strict and passthrough modes alike.
+3. **Passthrough mode** — partial, and not something to rely on: it pre-escapes
+   `{{ expressions }}` but not `{% statement tags %}`, so an inline incremental
+   model fails in both modes.
+
+This release makes the provider honour raw regions properly. Previously it left
+the markers in the SQL *and* expanded the tags inside them — the worst of both
+readings. Regions are now set aside before any phase runs and restored at the
+end, so their contents pass through exactly as written, and a model wrapped
+entirely in a raw block is rejected with an explanation rather than reaching
+BigQuery as unresolved text.

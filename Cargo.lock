@@ -588,6 +588,7 @@ dependencies = [
 name = "gcpx-dbt"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "criterion",
  "gcpx-bq",
  "gcpx-core",

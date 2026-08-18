@@ -18,7 +18,10 @@ pub fn preprocess(
     table_ref: &str,
     is_incremental: bool,
 ) -> Result<String, PreprocessError> {
-    let step1 = handle_incremental_blocks(sql, is_incremental);
+    // Raw regions are set aside before any other phase, so nothing downstream
+    // can mistake their contents for a template.
+    let protected = protect_raw_regions(sql)?;
+    let step1 = handle_incremental_blocks(&protected, is_incremental);
     let step2 = replace_this(&step1, table_ref);
     let step3 = expand_vars(&step2, vars)?;
     let step4 = expand_builtins(&step3);
@@ -29,6 +32,8 @@ pub fn preprocess(
 pub enum PreprocessError {
     #[error("unknown variable '{name}' — available vars: [{available}]")]
     UnknownVar { name: String, available: String },
+    #[error("unsupported SQL: {reason}")]
+    UnsupportedInput { reason: String },
 }
 
 // ── Feature 2: `{% if is_incremental() %}` ──────────────────────────
@@ -73,6 +78,8 @@ pub fn handle_incremental_blocks(sql: &str, keep: bool) -> String {
 enum TagKind {
     IfIsIncremental,
     EndIf,
+    Raw,
+    EndRaw,
 }
 
 /// Split at the first occurrence of `kind`, returning the text before the tag
@@ -105,7 +112,143 @@ fn tag_matches(inner: &str, kind: TagKind) -> bool {
     match kind {
         TagKind::IfIsIncremental => squashed.eq_ignore_ascii_case("ifis_incremental()"),
         TagKind::EndIf => squashed.eq_ignore_ascii_case("endif"),
+        TagKind::Raw => squashed.eq_ignore_ascii_case("raw"),
+        TagKind::EndRaw => squashed.eq_ignore_ascii_case("endraw"),
     }
+}
+
+// ── Raw regions ─────────────────────────────────────────────────────────────
+
+/// Sentinel that stands in for a raw region while the pipeline runs.
+///
+/// NUL cannot appear in the SQL the provider accepts, so the marker cannot
+/// collide with user content — and input containing one is rejected rather
+/// than trusted.
+const RAW_SENTINEL_PREFIX: &str = "\u{0}RAW:";
+const RAW_SENTINEL_SUFFIX: char = '\u{0}';
+
+/// Replace every `{% raw %}…{% endraw %}` region with an opaque sentinel.
+///
+/// # Why this exists
+///
+/// Two renderers see a stack, and both use the same delimiters. The YAML
+/// runtime renders the stack file before this provider sees any of it, so dbt
+/// syntax written inline there is evaluated by the wrong layer — and the
+/// standard Jinja way to say "not for you" is a raw block.
+///
+/// That leaves this provider needing to honour raw blocks too, for two
+/// different reasons:
+///
+/// - SQL loaded with `fn::readFile` never reaches the YAML renderer, so a raw
+///   block in such a file is addressed to *this* layer and means what dbt means
+///   by it: the contents are literal.
+/// - SQL written inline has already had its markers consumed by the YAML
+///   renderer, so anything still present arrived deliberately.
+///
+/// Either way the contents must survive untouched. Previously they did not:
+/// the markers were left in the SQL and shipped to BigQuery, while tags
+/// *inside* them were still expanded — the worst of both readings.
+///
+/// The region is carried through the pipeline base64-encoded, so no later stage
+/// can mistake its contents for a template, and restored at the end.
+pub fn protect_raw_regions(sql: &str) -> Result<String, PreprocessError> {
+    if sql.contains('\u{0}') {
+        return Err(PreprocessError::UnsupportedInput {
+            reason: "SQL may not contain NUL bytes".to_owned(),
+        });
+    }
+    if !contains_raw_tag(sql) {
+        return Ok(sql.to_owned());
+    }
+
+    let mut out = String::with_capacity(sql.len());
+    let mut rest = sql;
+    loop {
+        let Some((before, after_open)) = split_at_tag(rest, TagKind::Raw) else {
+            out.push_str(rest);
+            return Ok(out);
+        };
+        out.push_str(before);
+        match split_at_tag(after_open, TagKind::EndRaw) {
+            Some((body, after_close)) => {
+                out.push_str(RAW_SENTINEL_PREFIX);
+                out.push_str(&encode_raw(body));
+                out.push(RAW_SENTINEL_SUFFIX);
+                rest = after_close;
+            }
+            None => {
+                // An unclosed raw block: emit the remainder as-is rather than
+                // silently swallowing the query.
+                out.push_str(&rest[before.len()..]);
+                return Ok(out);
+            }
+        }
+    }
+}
+
+/// Put the raw regions back, markers gone and contents exactly as written.
+pub fn restore_raw_regions(text: &str) -> String {
+    if !text.contains(RAW_SENTINEL_PREFIX) {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find(RAW_SENTINEL_PREFIX) {
+        out.push_str(&rest[..start]);
+        let payload_start = start + RAW_SENTINEL_PREFIX.len();
+        match rest[payload_start..].find(RAW_SENTINEL_SUFFIX) {
+            Some(len) => {
+                let payload = &rest[payload_start..payload_start + len];
+                out.push_str(&decode_raw(payload));
+                rest = &rest[payload_start + len + RAW_SENTINEL_SUFFIX.len_utf8()..];
+            }
+            None => {
+                out.push_str(&rest[start..]);
+                return out;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Whether the entire body is one raw region.
+///
+/// A model that is *entirely* literal has no reason to be a dbt model, so this
+/// is the one shape that can only be a mistake: someone learned the raw idiom
+/// for inline SQL and then moved the SQL into a file, where the markers are no
+/// longer needed and now suppress the templating they wanted. Detected so the
+/// error can say that, instead of BigQuery rejecting unresolved `ref()` text.
+pub fn is_entirely_raw(sql: &str) -> bool {
+    let trimmed = sql.trim();
+    let Some((before, after_open)) = split_at_tag(trimmed, TagKind::Raw) else {
+        return false;
+    };
+    if !before.trim().is_empty() {
+        return false;
+    }
+    match split_at_tag(after_open, TagKind::EndRaw) {
+        Some((_, after_close)) => after_close.trim().is_empty(),
+        None => false,
+    }
+}
+
+fn contains_raw_tag(sql: &str) -> bool {
+    split_at_tag(sql, TagKind::Raw).is_some()
+}
+
+fn encode_raw(body: &str) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD_NO_PAD.encode(body.as_bytes())
+}
+
+fn decode_raw(payload: &str) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD_NO_PAD
+        .decode(payload.as_bytes())
+        .ok()
+        .and_then(|b| String::from_utf8(b).ok())
+        .unwrap_or_default()
 }
 
 // ── Feature 2: `{{ this }}` ─────────────────────────────────────────
@@ -461,6 +604,107 @@ fn parse_surrogate_key_cols(s: &str) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A raw block means "not a template". Previously the markers were shipped
+    /// to BigQuery and the tags inside them were expanded anyway.
+    #[test]
+    fn raw_regions_survive_untouched_and_lose_their_markers() {
+        let sql =
+            "{% raw %}SELECT {{ ref('x') }} {% if is_incremental() %}W{% endif %}{% endraw %}";
+        let out = preprocess(sql, &BTreeMap::new(), "`p.d.t`", false).unwrap();
+        let restored = restore_raw_regions(&out);
+        assert_eq!(
+            restored, "SELECT {{ ref('x') }} {% if is_incremental() %}W{% endif %}",
+            "raw contents must come back exactly as written, without markers"
+        );
+    }
+
+    #[test]
+    fn templates_outside_a_raw_region_are_still_rendered() {
+        // The point of protecting regions rather than whole files: the rest of
+        // the model still behaves like a model.
+        let sql = "SELECT 1 {% if is_incremental() %}WHERE live{% endif %} \
+                   AND note = '{% raw %}{{ not_a_ref }}{% endraw %}'";
+        let rendered =
+            restore_raw_regions(&preprocess(sql, &BTreeMap::new(), "`p.d.t`", true).unwrap());
+        assert!(rendered.contains("WHERE live"), "{rendered}");
+        assert!(rendered.contains("{{ not_a_ref }}"), "{rendered}");
+        assert!(!rendered.contains("{% raw"), "{rendered}");
+    }
+
+    #[test]
+    fn a_variable_inside_a_raw_region_is_not_substituted() {
+        let vars: BTreeMap<String, String> = [("d".to_owned(), "'2026-01-01'".to_owned())]
+            .into_iter()
+            .collect();
+        let out = restore_raw_regions(
+            &preprocess("{% raw %}{{ var('d') }}{% endraw %}", &vars, "`t`", false).unwrap(),
+        );
+        assert_eq!(out, "{{ var('d') }}");
+    }
+
+    #[test]
+    fn an_unknown_variable_inside_a_raw_region_is_not_an_error() {
+        // Outside a raw region this is a hard error naming the variable; inside
+        // one it is just text.
+        let out = preprocess(
+            "{% raw %}{{ var('nope') }}{% endraw %}",
+            &BTreeMap::new(),
+            "`t`",
+            false,
+        );
+        assert!(
+            out.is_ok(),
+            "raw contents must not be validated as templates"
+        );
+    }
+
+    #[test]
+    fn multiple_raw_regions_are_each_preserved() {
+        let sql = "{% raw %}{{ a }}{% endraw %} middle {% raw %}{{ b }}{% endraw %}";
+        let out = restore_raw_regions(&preprocess(sql, &BTreeMap::new(), "`t`", false).unwrap());
+        assert_eq!(out, "{{ a }} middle {{ b }}");
+    }
+
+    #[test]
+    fn raw_tags_tolerate_whitespace_and_trim_markers() {
+        for (open, close) in [
+            ("{% raw %}", "{% endraw %}"),
+            ("{%raw%}", "{%endraw%}"),
+            ("{%- raw -%}", "{%- endraw -%}"),
+            ("{%  raw  %}", "{%  endraw  %}"),
+        ] {
+            let sql = format!("{open}{{{{ x }}}}{close}");
+            let out =
+                restore_raw_regions(&preprocess(&sql, &BTreeMap::new(), "`t`", false).unwrap());
+            assert_eq!(out, "{{ x }}", "for {open}");
+        }
+    }
+
+    #[test]
+    fn an_unclosed_raw_block_keeps_the_users_sql() {
+        let sql = "SELECT 1 {% raw %} trailing";
+        let out = preprocess(sql, &BTreeMap::new(), "`t`", false).unwrap();
+        assert!(out.contains("trailing"), "dropped user SQL: {out}");
+    }
+
+    #[test]
+    fn nul_bytes_are_rejected_rather_than_trusted() {
+        // The sentinel is NUL-delimited, so input containing one could otherwise
+        // forge a region.
+        let err = preprocess("SELECT '\u{0}RAW:aGk\u{0}'", &BTreeMap::new(), "`t`", false)
+            .expect_err("NUL should be rejected");
+        assert!(err.to_string().contains("NUL"), "{err}");
+    }
+
+    #[test]
+    fn sql_without_raw_regions_is_unaffected() {
+        let sql = "SELECT a FROM `p.d.t` WHERE b = 'x'";
+        assert_eq!(
+            preprocess(sql, &BTreeMap::new(), "`t`", false).unwrap(),
+            sql
+        );
+    }
 
     /// B6: the matcher accepted exactly one spelling, so every other formatting
     /// leaked Jinja into the emitted SQL and BigQuery rejected it with a syntax

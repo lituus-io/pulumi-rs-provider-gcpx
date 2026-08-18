@@ -99,9 +99,15 @@ pub fn resolve(
         }
     }
 
+    // Raw regions were set aside before any phase ran; they come back here,
+    // markers gone and contents exactly as written. Restoring at the end means
+    // no stage in between could have mistaken them for a template.
     Ok(ResolvedSql {
-        ctes,
-        body: body.trim().to_owned(),
+        ctes: ctes
+            .into_iter()
+            .map(|(name, sql)| (name, crate::preprocess::restore_raw_regions(&sql)))
+            .collect(),
+        body: crate::preprocess::restore_raw_regions(body.trim()),
     })
 }
 

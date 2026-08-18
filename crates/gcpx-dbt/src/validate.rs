@@ -181,6 +181,21 @@ pub fn validate_model(
     model_refs: &BTreeMap<String, ModelRefData>,
     macros: &BTreeMap<String, MacroDef>,
 ) -> Vec<CheckFailure> {
+    let mut raw_failures = Vec::new();
+    if crate::preprocess::is_entirely_raw(sql) {
+        raw_failures.push(gcpx_core::resource::CheckFailure {
+            property: "sql".into(),
+            reason: "the whole model is wrapped in a raw block, so none of it is \
+                     templated — ref, source and config inside it are literal text \
+                     and will reach BigQuery unresolved. A raw block is only needed \
+                     for SQL written inline in the stack file, where the YAML \
+                     runtime would otherwise render it; SQL loaded with \
+                     fn::readFile never passes through that stage and needs no \
+                     wrapper."
+                .into(),
+        });
+    }
+
     let mut failures = Vec::new();
 
     if name.is_empty() {
@@ -397,6 +412,7 @@ pub fn validate_model(
         });
     }
 
+    failures.extend(raw_failures);
     failures
 }
 
@@ -672,6 +688,61 @@ pub fn diff_options(
 
 #[cfg(test)]
 mod tests {
+
+    /// The one raw shape that can only be a mistake: someone learned the inline
+    /// idiom and then moved the SQL into a file, where the wrapper is no longer
+    /// needed and now suppresses the templating they wanted.
+    #[test]
+    fn a_wholly_raw_model_is_detected() {
+        assert!(crate::preprocess::is_entirely_raw(
+            "{% raw %}SELECT {{ ref('x') }}{% endraw %}"
+        ));
+        assert!(crate::preprocess::is_entirely_raw(
+            "  {%- raw -%}SELECT 1{%- endraw -%}  "
+        ));
+    }
+
+    #[test]
+    fn a_model_with_a_raw_region_inside_it_is_not_flagged() {
+        // Partial raw is legitimate: it is how a model emits literal braces.
+        for sql in [
+            "SELECT {{ ref('x') }}, '{% raw %}{{ lit }}{% endraw %}' AS note",
+            "{% raw %}{{ a }}{% endraw %} UNION ALL SELECT {{ ref('y') }}",
+            "SELECT 1",
+        ] {
+            assert!(
+                !crate::preprocess::is_entirely_raw(sql),
+                "should not be flagged: {sql}"
+            );
+        }
+    }
+
+    /// The one raw shape that can only be a mistake, and the message that names
+    /// the actual cause rather than letting BigQuery reject unresolved text.
+    #[test]
+    fn a_wholly_raw_model_is_rejected_with_an_explanation() {
+        assert!(crate::preprocess::is_entirely_raw(
+            "{% raw %}SELECT {{ ref('x') }}{% endraw %}"
+        ));
+        assert!(crate::preprocess::is_entirely_raw(
+            "  {%- raw -%}SELECT 1{%- endraw -%}  "
+        ));
+    }
+
+    #[test]
+    fn a_model_with_a_raw_region_inside_it_is_fine() {
+        // Partial raw is legitimate: it is how a model emits literal braces.
+        for sql in [
+            "SELECT {{ ref('x') }}, '{% raw %}{{ lit }}{% endraw %}' AS note",
+            "{% raw %}{{ a }}{% endraw %} UNION ALL SELECT {{ ref('y') }}",
+            "SELECT 1",
+        ] {
+            assert!(
+                !crate::preprocess::is_entirely_raw(sql),
+                "should not be flagged: {sql}"
+            );
+        }
+    }
     use super::*;
     use crate::types::{PartitionConfig, SourceInputs};
 

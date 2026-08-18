@@ -22,6 +22,19 @@ pub struct DiffResult {
     pub update_keys: Vec<&'static str>,
 }
 
+impl DiffResult {
+    /// Whether anything changed at all.
+    pub fn has_changes(&self) -> bool {
+        !self.replace_keys.is_empty() || !self.update_keys.is_empty()
+    }
+
+    /// Whether any change forces the resource to be recreated rather than
+    /// updated in place.
+    pub fn needs_replace(&self) -> bool {
+        !self.replace_keys.is_empty()
+    }
+}
+
 /// Validation helper — records a failure when `value` is empty.
 pub fn require_non_empty(failures: &mut Vec<CheckFailure>, property: &'static str, value: &str) {
     if value.is_empty() {
@@ -35,6 +48,36 @@ pub fn require_non_empty(failures: &mut Vec<CheckFailure>, property: &'static st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_keys_means_no_changes() {
+        let d = DiffResult {
+            replace_keys: vec![],
+            update_keys: vec![],
+        };
+        assert!(!d.has_changes());
+        assert!(!d.needs_replace());
+    }
+
+    #[test]
+    fn update_keys_change_without_replacing() {
+        let d = DiffResult {
+            replace_keys: vec![],
+            update_keys: vec!["description"],
+        };
+        assert!(d.has_changes());
+        assert!(!d.needs_replace());
+    }
+
+    #[test]
+    fn replace_keys_force_replacement() {
+        let d = DiffResult {
+            replace_keys: vec!["project"],
+            update_keys: vec![],
+        };
+        assert!(d.has_changes());
+        assert!(d.needs_replace());
+    }
 
     #[test]
     fn require_non_empty_records_empty() {

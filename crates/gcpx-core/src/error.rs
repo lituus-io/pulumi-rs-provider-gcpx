@@ -403,7 +403,10 @@ mod tests {
         // one at a time would forward most of the key.
         let pem = "config error: -----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0\nBAQEFAASC\n-----END PRIVATE KEY-----";
         let out = redact(pem);
-        assert!(!out.contains("MIIEvQIBADANBgkqhkiG9w0"), "key body leaked: {out}");
+        assert!(
+            !out.contains("MIIEvQIBADANBgkqhkiG9w0"),
+            "key body leaked: {out}"
+        );
         assert!(!out.contains("BEGIN PRIVATE KEY"));
     }
 

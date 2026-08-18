@@ -368,6 +368,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "gcpx-bq"
+version = "0.1.0"
+dependencies = [
+ "gcpx-core",
+ "proptest",
+ "prost-types",
+ "pulumi-rs-yaml-proto",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
 name = "gcpx-core"
 version = "0.1.0"
 dependencies = [

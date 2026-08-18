@@ -384,7 +384,11 @@ mod tests {
         // A constant jitter is the failure mode worth catching: it would make
         // every retrying client wake at the same instant.
         assert!(
-            samples.iter().collect::<std::collections::HashSet<_>>().len() > 1,
+            samples
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                > 1,
             "jitter is not varying"
         );
     }

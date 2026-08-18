@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use pulumi_rs_yaml_proto::pulumirpc;
 use tonic::{Response, Status};
 
-use crate::resource::CheckFailure;
+use crate::resource::{CheckFailure, DiffResult};
 
 /// Build a CheckResponse from news and validation failures.
 /// Eliminates the repeated CheckFailure → pulumirpc::CheckFailure mapping
@@ -33,12 +33,9 @@ pub fn build_check_response(
 /// Build a DiffResponse from replace and update key lists.
 /// Eliminates the repeated detailed_diff HashMap construction
 /// across all resource diff handlers.
-pub fn build_diff_response(
-    replace_keys: &[&str],
-    update_keys: &[&str],
-) -> Response<pulumirpc::DiffResponse> {
-    let has_changes = !replace_keys.is_empty() || !update_keys.is_empty();
-    let changes = if has_changes {
+pub fn build_diff_response(diff: &DiffResult) -> Response<pulumirpc::DiffResponse> {
+    let (replace_keys, update_keys) = (&diff.replace_keys, &diff.update_keys);
+    let changes = if diff.has_changes() {
         pulumirpc::diff_response::DiffChanges::DiffSome as i32
     } else {
         pulumirpc::diff_response::DiffChanges::DiffNone as i32
@@ -99,7 +96,10 @@ mod tests {
 
     #[test]
     fn diff_response_no_changes() {
-        let resp = build_diff_response(&[], &[]);
+        let resp = build_diff_response(&DiffResult {
+            replace_keys: vec![],
+            update_keys: vec![],
+        });
         let inner = resp.into_inner();
         assert_eq!(
             inner.changes,
@@ -111,7 +111,10 @@ mod tests {
 
     #[test]
     fn diff_response_with_replaces() {
-        let resp = build_diff_response(&["project", "dataset"], &[]);
+        let resp = build_diff_response(&DiffResult {
+            replace_keys: vec!["project", "dataset"],
+            update_keys: vec![],
+        });
         let inner = resp.into_inner();
         assert_eq!(
             inner.changes,
@@ -127,7 +130,10 @@ mod tests {
 
     #[test]
     fn diff_response_with_updates() {
-        let resp = build_diff_response(&[], &["description", "labels"]);
+        let resp = build_diff_response(&DiffResult {
+            replace_keys: vec![],
+            update_keys: vec!["description", "labels"],
+        });
         let inner = resp.into_inner();
         assert_eq!(
             inner.changes,
@@ -143,7 +149,10 @@ mod tests {
 
     #[test]
     fn diff_response_mixed() {
-        let resp = build_diff_response(&["project"], &["description"]);
+        let resp = build_diff_response(&DiffResult {
+            replace_keys: vec!["project"],
+            update_keys: vec!["description"],
+        });
         let inner = resp.into_inner();
         assert_eq!(inner.replaces.len(), 1);
         assert_eq!(inner.detailed_diff.len(), 2);

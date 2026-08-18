@@ -261,7 +261,10 @@ mod tests {
         }
         assert!(set.get(Service::BigQuery).is_open());
         assert!(set.get(Service::Vertex).is_closed());
-        assert!(set.get(Service::Vertex).allow_request(Service::Vertex).is_ok());
+        assert!(set
+            .get(Service::Vertex)
+            .allow_request(Service::Vertex)
+            .is_ok());
     }
 
     #[test]

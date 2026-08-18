@@ -38,7 +38,6 @@ impl OutputBuilder {
         self
     }
 
-
     pub fn bool_opt(mut self, key: &str, val: Option<bool>) -> Self {
         if let Some(v) = val {
             self.0.insert(key.to_owned(), prost_bool(v));

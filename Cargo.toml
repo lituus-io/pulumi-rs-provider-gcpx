@@ -23,6 +23,10 @@ publish = false
 autotests = false
 
 [[test]]
+name = "security"
+path = "tests/security.rs"
+
+[[test]]
 name = "gcp_live"
 path = "tests/gcp_live.rs"
 
@@ -36,6 +40,7 @@ gcpx-bq = { workspace = true }
 gcpx-dbt = { workspace = true }
 gcpx-provider = { workspace = true }
 gcpx-agents = { workspace = true }
+gcpx-snapshot = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 serde_json = { workspace = true }
 futures-util = { workspace = true }
@@ -58,8 +63,8 @@ members = [
 # In-workspace crates
 gcpx-core = { path = "crates/gcpx-core", version = "0.1.0" }
 gcpx-bq = { path = "crates/gcpx-bq", version = "0.1.0" }
-gcpx-dbt = { path = "crates/gcpx-dbt", version = "0.1.0" }
 gcpx-scheduler = { path = "crates/gcpx-scheduler", version = "0.1.0" }
+gcpx-dbt = { path = "crates/gcpx-dbt", version = "0.1.0" }
 gcpx-snapshot = { path = "crates/gcpx-snapshot", version = "0.1.0" }
 gcpx-dataproc = { path = "crates/gcpx-dataproc", version = "0.1.0" }
 gcpx-agents = { path = "crates/gcpx-agents", version = "0.1.0" }

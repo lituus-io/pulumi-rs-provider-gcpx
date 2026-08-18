@@ -225,38 +225,99 @@ pub fn redact(message: &str) -> String {
     const MAX: usize = 512;
     const PLACEHOLDER: &str = "[redacted]";
 
-    // PEM material spans many whitespace-separated tokens, so scrubbing token
-    // by token would leave most of the key intact. A message carrying key
-    // material has nothing worth forwarding, so none of it is.
+    // PEM material spans many tokens, so scrubbing piecemeal would leave most
+    // of the key intact. A message carrying key material has nothing worth
+    // forwarding, so none of it is.
     if message.contains("-----BEGIN") {
         return "[redacted: message contained private key material]".to_owned();
     }
 
+    // Scanned in place rather than tokenised on whitespace. API error bodies are
+    // JSON, so a credential usually arrives as `{"token":"ya29...."}` — where a
+    // whitespace-delimited token does not *start* with the marker and a
+    // prefix check misses precisely the case that matters most.
     let mut out = String::with_capacity(message.len().min(MAX));
+    let bytes = message.as_bytes();
+    let mut i = 0;
     let mut after_bearer = false;
 
-    for token in message.split_whitespace() {
-        // `Bearer` is short, but the token *after* it is the credential.
-        let secret = after_bearer
-            || token.starts_with("ya29.")   // Google OAuth access token
-            || token.starts_with("AIza")    // Google API key
-            || token.starts_with("gho_")    // OAuth app token
-            || token.starts_with("ghp_")    // personal access token
-            || (token.starts_with("eyJ") && token.len() > 20); // JWT
-        after_bearer = token.eq_ignore_ascii_case("bearer");
-
-        if !out.is_empty() {
-            out.push(' ');
+    while i < bytes.len() {
+        // A credential run, wherever it begins.
+        if let Some(marker) = CREDENTIAL_MARKERS
+            .iter()
+            .find(|m| message[i..].starts_with(**m))
+        {
+            let end = i + credential_run_len(&message[i..]);
+            debug_assert!(end > i);
+            out.push_str(PLACEHOLDER);
+            i = end;
+            after_bearer = false;
+            let _ = marker;
+            continue;
         }
-        out.push_str(if secret { PLACEHOLDER } else { token });
+
+        // The value after `Bearer` is a credential whatever it looks like.
+        if after_bearer && !bytes[i].is_ascii_whitespace() {
+            let end = i + credential_run_len(&message[i..]);
+            out.push_str(PLACEHOLDER);
+            i = end.max(i + 1);
+            after_bearer = false;
+            continue;
+        }
+        if message[i..].starts_with("Bearer") || message[i..].starts_with("bearer") {
+            out.push_str(&message[i..i + 6]);
+            i += 6;
+            after_bearer = true;
+            continue;
+        }
+
+        let ch = message[i..]
+            .chars()
+            .next()
+            .expect("index is on a char boundary");
+        out.push(ch);
+        i += ch.len_utf8();
 
         if out.len() >= MAX {
-            out.truncate(MAX);
+            out.truncate(floor_char_boundary(&out, MAX));
             out.push('…');
-            break;
+            return out;
         }
     }
     out
+}
+
+/// Prefixes that unambiguously begin a credential.
+const CREDENTIAL_MARKERS: &[&str] = &[
+    "ya29.", // Google OAuth access token
+    "AIza",  // Google API key
+    "gho_", "ghp_", "ghs_", "ghu_", // GitHub tokens
+    "eyJ",  // JWT header
+    "1//",  // Google refresh token
+];
+
+/// How far a credential runs from `s`'s start: the characters tokens are made
+/// of, stopping at whatever quotes or delimits them.
+fn credential_run_len(s: &str) -> usize {
+    let len = s
+        .find(|c: char| {
+            !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '+' | '='))
+        })
+        .unwrap_or(s.len());
+    len.max(1)
+}
+
+/// Truncate to a char boundary at or below `max`, so a multi-byte character is
+/// never split in half.
+fn floor_char_boundary(s: &str, max: usize) -> usize {
+    if max >= s.len() {
+        return s.len();
+    }
+    let mut i = max;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
 }
 
 /// Convert a `Result` into a `Status`-carrying one.

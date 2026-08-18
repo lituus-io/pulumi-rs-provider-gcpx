@@ -31,3 +31,8 @@ memchr = { workspace = true }
 gcpx-dbt = { path = ".", features = ["mock"] }
 tokio = { workspace = true, features = ["test-util"] }
 proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "render_bench"
+harness = false

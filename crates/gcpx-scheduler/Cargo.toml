@@ -2,8 +2,8 @@
 # Author: terekete <spicyzhug@gmail.com>
 
 [package]
-name = "gcpx-bq"
-description = "BigQuery resources for the gcpx Pulumi provider: schema evolution, tables, datasets, routines"
+name = "gcpx-scheduler"
+description = "Cloud Workflows and Cloud Scheduler orchestration for the gcpx Pulumi provider"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,21 +12,21 @@ authors.workspace = true
 repository.workspace = true
 
 [features]
-# The double is a library item, not a test item: a `cfg(test)` mock is invisible
-# to every other crate, which is why the predecessor could not share one.
-mock = ["dep:thiserror"]
+mock = ["gcpx-bq/mock", "dep:thiserror"]
 
 [dependencies]
 gcpx-core = { workspace = true }
+gcpx-bq = { workspace = true }
 pulumi-rs-yaml-proto = { workspace = true }
 tonic = { workspace = true }
 prost-types = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+base64 = { workspace = true }
 thiserror = { workspace = true, optional = true }
 
 [dev-dependencies]
-gcpx-bq = { path = ".", features = ["mock"] }
+gcpx-scheduler = { path = ".", features = ["mock"] }
 tokio = { workspace = true, features = ["test-util"] }
 proptest = { workspace = true }

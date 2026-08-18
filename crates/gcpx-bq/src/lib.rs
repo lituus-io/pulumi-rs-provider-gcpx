@@ -11,6 +11,8 @@
 //! constructing a provider at all.
 
 pub mod dataset;
+#[cfg(feature = "mock")]
+pub mod mock;
 pub mod ops;
 pub mod routine;
 pub mod schema;

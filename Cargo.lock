@@ -371,12 +371,14 @@ dependencies = [
 name = "gcpx-bq"
 version = "0.1.0"
 dependencies = [
+ "gcpx-bq",
  "gcpx-core",
  "proptest",
  "prost-types",
  "pulumi-rs-yaml-proto",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
  "tonic",
 ]
@@ -391,6 +393,24 @@ dependencies = [
  "prost-types",
  "pulumi-rs-yaml-proto",
  "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
+name = "gcpx-scheduler"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "gcpx-bq",
+ "gcpx-core",
+ "gcpx-scheduler",
+ "proptest",
+ "prost-types",
+ "pulumi-rs-yaml-proto",
  "serde",
  "serde_json",
  "thiserror",

@@ -12,6 +12,7 @@ repository = "https://github.com/lituus-io/pulumi-rs-provider-gcpx"
 [workspace]
 resolver = "2"
 members = [
+    "crates/gcpx-agents",
     "crates/gcpx-snapshot",
     "crates/gcpx-dataproc",
     "crates/gcpx-dbt",
@@ -44,6 +45,7 @@ prost-types = "0.13"
 # Async runtime. No `signal`: the plugin's lifetime is owned by the engine.
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
 tokio-stream = "0.1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

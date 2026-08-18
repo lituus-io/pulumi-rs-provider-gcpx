@@ -614,6 +614,7 @@ dependencies = [
  "gcpx-core",
  "gcpx-dbt",
  "gcpx-provider",
+ "gcpx-scheduler",
  "gcpx-snapshot",
  "serde_json",
  "tokio",

@@ -23,6 +23,10 @@ publish = false
 autotests = false
 
 [[test]]
+name = "gcp_live_scheduled"
+path = "tests/gcp_live_scheduled.rs"
+
+[[test]]
 name = "security"
 path = "tests/security.rs"
 
@@ -41,6 +45,7 @@ gcpx-dbt = { workspace = true }
 gcpx-provider = { workspace = true }
 gcpx-agents = { workspace = true }
 gcpx-snapshot = { workspace = true }
+gcpx-scheduler = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 serde_json = { workspace = true }
 futures-util = { workspace = true }

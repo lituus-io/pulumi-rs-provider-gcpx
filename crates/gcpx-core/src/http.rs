@@ -98,6 +98,20 @@ impl<C: CredentialSource> HttpGcpClient<C> {
                     || message.contains("Job exceeded rate limits")
                     || message.contains("backendError")
             }
+            // Not every 409 means "already exists". Cloud Scheduler answers a
+            // resume issued shortly after a pause with 409 ABORTED, "parent
+            // resource not in ready state" — its own internal resources have
+            // not settled yet. That is transient and resolves in seconds, but
+            // treating every 409 as terminal turns it into a failed deploy.
+            //
+            // The distinction matters in both directions: a genuine
+            // already-exists 409 must still fall through, because that is what
+            // drives the adopt path.
+            409 => {
+                message.contains("not in ready state")
+                    || message.contains("ABORTED")
+                    || message.contains("try again")
+            }
             _ => false,
         }
     }
@@ -345,8 +359,23 @@ mod tests {
     }
 
     #[test]
+    fn a_transient_conflict_is_retried_but_an_existing_resource_is_not() {
+        // Cloud Scheduler answers a resume issued right after a pause with
+        // 409 ABORTED; that clears in seconds. An already-exists 409 must not
+        // be retried, because it is what drives the adopt path.
+        assert!(HttpGcpClient::<StaticCredentials>::is_retryable(
+            409,
+            r#"{"error":{"code":409,"message":"parent resource not in ready state for projects/1/locations/us-central1/streams/x","status":"ABORTED"}}"#
+        ));
+        assert!(!HttpGcpClient::<StaticCredentials>::is_retryable(
+            409,
+            r#"{"error":{"code":409,"message":"Already Exists: Dataset p:ds"}}"#
+        ));
+    }
+
+    #[test]
     fn ordinary_client_errors_are_not_retryable() {
-        for status in [400, 401, 403, 404, 409, 412] {
+        for status in [400, 401, 403, 404, 412] {
             assert!(
                 !HttpGcpClient::<StaticCredentials>::is_retryable(status, "bad request"),
                 "{status} should not retry"

@@ -1,0 +1,40 @@
+# Copyright: lituus-io, all rights reserved.
+# Author: terekete <spicyzhug@gmail.com>
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pulumi-rs-provider-gcpx"
+version = "0.1.0"
+description = "Pulumi resource provider for GCP data engineering and data agents"
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+requires-python = ">=3.9"
+authors = [{ name = "terekete", email = "spicyzhug@gmail.com" }]
+keywords = ["pulumi", "gcp", "bigquery", "dbt", "data-agents"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Build Tools",
+]
+dependencies = ["pulumi>=3.0"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/lituus-io/pulumi-rs-provider-gcpx"
+
+# The console script keeps the name Pulumi's plugin loader looks for, which is
+# not the same as the distribution name.
+[project.scripts]
+pulumi-resource-gcpx = "pulumi_rs_provider_gcpx.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["python"]
+
+[tool.setuptools.package-data]
+pulumi_rs_provider_gcpx = ["bin/*"]

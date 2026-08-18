@@ -401,6 +401,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "gcpx-dbt"
+version = "0.1.0"
+dependencies = [
+ "gcpx-bq",
+ "gcpx-core",
+ "gcpx-dbt",
+ "gcpx-scheduler",
+ "memchr",
+ "proptest",
+ "prost-types",
+ "pulumi-rs-yaml-proto",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
 name = "gcpx-scheduler"
 version = "0.1.0"
 dependencies = [

@@ -17,8 +17,10 @@
 pub mod api_body;
 pub mod chat;
 pub mod grounding;
+pub mod handlers;
 pub mod ops;
 pub mod parse;
 pub mod types;
+pub mod validate;
 
 pub use ops::{DataAgentOps, VertexAgentOps};

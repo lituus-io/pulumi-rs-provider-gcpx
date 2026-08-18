@@ -38,6 +38,13 @@ impl OutputBuilder {
         self
     }
 
+    /// Always emits the key. Use when absence and `false` mean different
+    /// things to the consumer.
+    pub fn bool_val(mut self, key: &str, val: bool) -> Self {
+        self.0.insert(key.to_owned(), prost_bool(val));
+        self
+    }
+
     pub fn bool_opt(mut self, key: &str, val: Option<bool>) -> Self {
         if let Some(v) = val {
             self.0.insert(key.to_owned(), prost_bool(v));

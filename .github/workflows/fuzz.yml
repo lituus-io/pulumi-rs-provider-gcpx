@@ -1,0 +1,75 @@
+# Copyright: lituus-io, all rights reserved.
+# Author: terekete <spicyzhug@gmail.com>
+
+name: Fuzz
+
+on:
+  schedule:
+    - cron: '0 3 * * 3'  # Weekly, Wednesday 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Fuzz duration per target (seconds)'
+        default: '600'
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  FUZZ_DURATION: ${{ inputs.duration || '600' }}
+
+jobs:
+  discover:
+    name: Discover targets
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v4
+      # Enumerated from the manifest so a new target is fuzzed the day it lands
+      # instead of waiting for someone to remember to edit this matrix.
+      - id: list
+        working-directory: fuzz
+        run: |
+          targets=$(grep -oP '(?<=^name = ")[^"]+' fuzz/Cargo.toml 2>/dev/null || \
+                    ls fuzz_targets/*.rs | xargs -n1 basename | sed 's/\.rs$//')
+          echo "targets=$(echo "$targets" | jq -R -s -c 'split("\n") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
+
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    needs: discover
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.discover.outputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: fuzz-${{ matrix.target }}
+      # Coverage compounds only if the corpus survives between runs. Without
+      # this the fuzzer re-derives trivial inputs every week and never gets deep.
+      - name: Restore evolved corpus
+        uses: actions/cache@v4
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@cargo-fuzz
+      - name: Run fuzzer
+        working-directory: fuzz
+        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=${{ env.FUZZ_DURATION }}
+      - name: Minimise corpus
+        working-directory: fuzz
+        run: cargo +nightly fuzz cmin ${{ matrix.target }}
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/

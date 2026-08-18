@@ -1,0 +1,51 @@
+# Build artifacts
+/target/
+fuzz/target/
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+python/dist/
+
+# Bundled binary in the Python package (populated at build time)
+python/python/pulumi_rs_provider_gcpx/bin/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pulumi local state
+.pulumi/
+
+# Credentials (never commit)
+.env
+*.pem
+*.key
+creds/
+
+# Local scratch
+.scratch/
+
+# Fuzzing: crash artifacts, slow-unit reports, and generated corpus.
+# Curated seed inputs (*.sql, *.yaml, *.txt, *.json) are kept under version control.
+fuzz/artifacts/
+fuzz/slow-unit-*
+fuzz/corpus/**
+!fuzz/corpus/**/
+!fuzz/corpus/**/*.sql
+!fuzz/corpus/**/*.yaml
+!fuzz/corpus/**/*.txt
+!fuzz/corpus/**/*.json

@@ -1,0 +1,205 @@
+# Copyright: lituus-io, all rights reserved.
+# Author: terekete <spicyzhug@gmail.com>
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --check
+
+  hygiene:
+    name: Hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Vendor and downstream names must never enter this tree or its history.
+      # Enforced mechanically because a convention that relies on memory drifts.
+      - name: Scan tree and commit messages for forbidden tokens
+        run: ./scripts/hygiene.sh
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    needs: fmt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test-linux-x86:
+    name: Test (Linux x86_64)
+    runs-on: ubuntu-latest
+    needs: fmt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked
+
+  test-linux-arm:
+    name: Test (Linux ARM64)
+    runs-on: ubuntu-24.04-arm
+    needs: fmt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked
+
+  test-macos-arm:
+    name: Test (macOS ARM64)
+    runs-on: macos-15
+    needs: fmt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked
+
+  test-windows:
+    name: Test (Windows x86_64)
+    runs-on: windows-latest
+    needs: fmt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked
+
+  msrv:
+    name: MSRV (1.90)
+    runs-on: ubuntu-latest
+    needs: fmt
+    steps:
+      - uses: actions/checkout@v4
+      # dtolnay/rust-toolchain exports RUSTUP_TOOLCHAIN, which overrides the
+      # rust-toolchain.toml pin — so the pinned MSRV must be requested here
+      # explicitly or it is never exercised in CI.
+      - uses: dtolnay/rust-toolchain@1.90
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets --locked
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    needs: fmt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - run: cargo llvm-cov --workspace --locked --fail-under-lines 85 --summary-only
+
+  conformance:
+    name: Conformance
+    runs-on: ubuntu-latest
+    needs: fmt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Asserts the plugin protocol surface: port-on-stdout handshake, the full
+      # resource-token set, >4 MiB GetSchema round-trip, and reported version.
+      - run: cargo test --locked --test conformance
+
+  python-test:
+    name: Python Tests
+    runs-on: ubuntu-latest
+    needs: fmt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build binary and install Python package
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install pytest
+          ./python/build_binary.sh
+          pip install ./python
+      - name: Run Python tests
+        run: |
+          . .venv/bin/activate
+          pytest python/tests -v
+
+  binary-size:
+    name: Binary size
+    runs-on: ubuntu-latest
+    needs: fmt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: size
+      # Reports the size so a dependency can never silently double the binary
+      # unnoticed. Informational: it prints, it does not gate.
+      #
+      # RUSTFLAGS is cleared deliberately: an env-level RUSTFLAGS makes cargo
+      # ignore `target.*.rustflags` from .cargo/config.toml, so the rest of CI
+      # never exercises the real release link configuration. Clearing it here
+      # means this job links exactly like release.yml does.
+      - name: Build and report size
+        env:
+          RUSTFLAGS: ""
+        run: |
+          cargo build --release --locked -p pulumi-resource-gcpx
+          size=$(stat -c%s target/release/pulumi-resource-gcpx)
+          {
+            echo "### Release binary size"
+            echo ""
+            echo "| Binary | Bytes | MiB |"
+            echo "|---|---:|---:|"
+            printf '| pulumi-resource-gcpx | %s | %.2f |\n' "$size" "$(echo "scale=4; $size/1048576" | bc)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  cross-check:
+    name: Cross-compile check
+    runs-on: ubuntu-latest
+    needs: fmt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
+      - name: Ensure musl targets installed
+        run: rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-zigbuild
+        run: pip install cargo-zigbuild
+      - name: Check musl x86_64
+        run: cargo zigbuild --workspace --locked --target x86_64-unknown-linux-musl --release
+      - name: Check musl aarch64
+        run: cargo zigbuild --workspace --locked --target aarch64-unknown-linux-musl --release

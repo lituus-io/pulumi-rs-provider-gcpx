@@ -1,0 +1,151 @@
+# Copyright: lituus-io, all rights reserved.
+# Author: terekete <spicyzhug@gmail.com>
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-binary:
+    name: Binary (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            method: zigbuild
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            method: zigbuild
+          - name: darwin-amd64
+            runner: macos-15
+            target: x86_64-apple-darwin
+            method: native
+          - name: darwin-arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            method: native
+          - name: windows-amd64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            method: native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-zigbuild
+        if: matrix.method == 'zigbuild'
+        run: pip install cargo-zigbuild
+
+      - name: Build (zigbuild)
+        if: matrix.method == 'zigbuild'
+        run: cargo zigbuild --release --locked --target ${{ matrix.target }} -p pulumi-resource-gcpx
+
+      - name: Build (native)
+        if: matrix.method == 'native'
+        run: cargo build --release --locked --target ${{ matrix.target }} -p pulumi-resource-gcpx
+
+      - name: Package
+        shell: bash
+        run: |
+          bin=pulumi-resource-gcpx
+          [[ "${{ matrix.target }}" == *windows* ]] && bin="$bin.exe"
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/$bin" "dist/"
+          cd dist && shasum -a 256 "$bin" > "$bin.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.name }}
+          path: dist/
+
+  sbom:
+    name: SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-cyclonedx
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-cyclonedx
+      - run: cargo cyclonedx --format json --all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: "**/*.cdx.json"
+
+  python-wheels:
+    name: Wheel (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    needs: build-binary
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-amd64,  plat: manylinux2014_x86_64 }
+          - { name: linux-arm64,  plat: manylinux2014_aarch64 }
+          - { name: darwin-amd64, plat: macosx_11_0_x86_64 }
+          - { name: darwin-arm64, plat: macosx_11_0_arm64 }
+          - { name: windows-amd64, plat: win_amd64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ matrix.name }}
+          path: dist-bin
+      - name: Stage binary into package
+        run: |
+          mkdir -p python/python/pulumi_rs_provider_gcpx/bin
+          cp dist-bin/pulumi-resource-gcpx* python/python/pulumi_rs_provider_gcpx/bin/
+          chmod +x python/python/pulumi_rs_provider_gcpx/bin/* || true
+      - name: Build wheel
+        run: |
+          pip install build wheel
+          python -m build --wheel python/
+          pip install wheel
+          python -m wheel tags --platform-tag ${{ matrix.plat }} --remove python/dist/*.whl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.name }}
+          path: python/dist/*.whl
+
+  release:
+    name: Publish release
+    runs-on: ubuntu-latest
+    needs: [build-binary, python-wheels, sbom]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name 'pulumi-resource-gcpx*' -o -name '*.whl' -o -name '*.cdx.json' \) \
+            -exec cp {} release/ \;
+          ls -la release
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true

@@ -26,11 +26,16 @@ autotests = false
 name = "gcp_live"
 path = "tests/gcp_live.rs"
 
+[[test]]
+name = "gcp_live_agents"
+path = "tests/gcp_live_agents.rs"
+
 [dev-dependencies]
 gcpx-core = { workspace = true }
 gcpx-bq = { workspace = true }
 gcpx-dbt = { workspace = true }
 gcpx-provider = { workspace = true }
+gcpx-agents = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 serde_json = { workspace = true }
 futures-util = { workspace = true }

@@ -65,6 +65,7 @@ pub struct ModelRefData {
 }
 
 /// Resolved SQL after template expansion.
+#[derive(Debug)]
 pub struct ResolvedSql {
     pub ctes: Vec<(String, String)>,
     pub body: String,

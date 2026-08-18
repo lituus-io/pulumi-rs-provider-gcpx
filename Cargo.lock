@@ -462,6 +462,7 @@ name = "gcpx-live-tests"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "gcpx-agents",
  "gcpx-bq",
  "gcpx-core",
  "gcpx-dbt",

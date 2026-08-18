@@ -12,6 +12,8 @@ repository = "https://github.com/lituus-io/pulumi-rs-provider-gcpx"
 [workspace]
 resolver = "2"
 members = [
+    "crates/gcpx-snapshot",
+    "crates/gcpx-dataproc",
     "crates/gcpx-dbt",
     "crates/gcpx-scheduler",
     "crates/gcpx-bq",

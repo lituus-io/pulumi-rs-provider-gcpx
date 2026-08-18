@@ -401,6 +401,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "gcpx-dataproc"
+version = "0.1.0"
+dependencies = [
+ "gcpx-bq",
+ "gcpx-core",
+ "gcpx-dataproc",
+ "gcpx-scheduler",
+ "proptest",
+ "prost-types",
+ "pulumi-rs-yaml-proto",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
 name = "gcpx-dbt"
 version = "0.1.0"
 dependencies = [
@@ -433,6 +450,23 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
+name = "gcpx-snapshot"
+version = "0.1.0"
+dependencies = [
+ "gcpx-bq",
+ "gcpx-core",
+ "gcpx-scheduler",
+ "gcpx-snapshot",
+ "proptest",
+ "prost-types",
+ "pulumi-rs-yaml-proto",
+ "serde",
+ "serde_json",
  "tokio",
  "tonic",
 ]

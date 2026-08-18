@@ -1,0 +1,31 @@
+# Copyright: lituus-io, all rights reserved.
+# Author: terekete <spicyzhug@gmail.com>
+
+[package]
+name = "gcpx-snapshot"
+description = "SCD Type 2 snapshots for the gcpx Pulumi provider"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+mock = ["gcpx-bq/mock", "gcpx-scheduler/mock"]
+
+[dependencies]
+gcpx-core = { workspace = true }
+gcpx-bq = { workspace = true }
+gcpx-scheduler = { workspace = true }
+pulumi-rs-yaml-proto = { workspace = true }
+tonic = { workspace = true }
+prost-types = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+gcpx-snapshot = { path = ".", features = ["mock"] }
+tokio = { workspace = true, features = ["test-util"] }
+proptest = { workspace = true }

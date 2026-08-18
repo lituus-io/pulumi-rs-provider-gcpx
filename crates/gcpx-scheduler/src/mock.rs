@@ -360,8 +360,9 @@ impl BqOps for MockSchedulerClient {
         &'a self,
         project: &'a str,
         dataset_id: &'a str,
+        delete_contents: bool,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a {
-        self.bq.delete_dataset(project, dataset_id)
+        self.bq.delete_dataset(project, dataset_id, delete_contents)
     }
 
     fn create_routine<'a>(

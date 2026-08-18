@@ -849,6 +849,10 @@
         "maxTimeTravelHours": {
           "type": "integer",
           "description": "Max time travel hours (0 or 48-168)."
+        },
+        "deleteContentsOnDestroy": {
+          "type": "boolean",
+          "description": "Whether destroying this dataset also deletes the tables, views and routines inside it. Defaults to false: BigQuery refuses to drop a non-empty dataset, so leaving this off means a destroy fails loudly rather than removing data the stack may not manage."
         }
       },
       "requiredInputs": [
@@ -892,6 +896,10 @@
         "etag": {
           "type": "string",
           "description": "Entity tag for optimistic concurrency."
+        },
+        "deleteContentsOnDestroy": {
+          "type": "boolean",
+          "description": "Whether destroying this dataset also deletes the tables, views and routines inside it. Defaults to false: BigQuery refuses to drop a non-empty dataset, so leaving this off means a destroy fails loudly rather than removing data the stack may not manage."
         }
       },
       "required": [

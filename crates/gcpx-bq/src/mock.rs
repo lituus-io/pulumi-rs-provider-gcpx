@@ -277,11 +277,17 @@ impl BqOps for MockBqClient {
         &'a self,
         _project: &'a str,
         dataset_id: &'a str,
+        delete_contents: bool,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a {
-        self.dataset_log
-            .lock()
-            .unwrap()
-            .push(("delete".to_owned(), dataset_id.to_owned()));
+        // Recorded so a test can assert the cascade was requested.
+        self.dataset_log.lock().unwrap().push((
+            if delete_contents {
+                "delete_contents".to_owned()
+            } else {
+                "delete".to_owned()
+            },
+            dataset_id.to_owned(),
+        ));
         async move { self.guard("delete_dataset") }
     }
 

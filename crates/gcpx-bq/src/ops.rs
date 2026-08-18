@@ -107,10 +107,17 @@ pub trait BqOps: Send + Sync + 'static {
         body: &'a serde_json::Value,
     ) -> impl Future<Output = Result<DatasetMeta, Self::Error>> + Send + 'a;
 
+    /// Delete a dataset.
+    ///
+    /// `delete_contents` maps to BigQuery's `deleteContents`, which is required
+    /// to delete a dataset that still holds tables. Without it the API refuses,
+    /// and since a dataset is usually the parent of the tables and models in
+    /// the same stack, that is the ordinary case rather than an edge one.
     fn delete_dataset<'a>(
         &'a self,
         project: &'a str,
         dataset_id: &'a str,
+        delete_contents: bool,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a;
 
     fn create_routine<'a>(
@@ -307,9 +314,13 @@ impl<C: CredentialSource> BqOps for HttpGcpClient<C> {
         &'a self,
         project: &'a str,
         dataset_id: &'a str,
+        delete_contents: bool,
     ) -> Result<(), Self::Error> {
-        self.delete_ok(Service::BigQuery, &dataset_url(project, dataset_id))
-            .await
+        let mut url = dataset_url(project, dataset_id);
+        if delete_contents {
+            url.push_str("?deleteContents=true");
+        }
+        self.delete_ok(Service::BigQuery, &url).await
     }
 
     async fn create_routine<'a>(

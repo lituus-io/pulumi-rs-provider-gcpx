@@ -458,6 +458,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "gcpx-live-tests"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "gcpx-bq",
+ "gcpx-core",
+ "gcpx-dbt",
+ "gcpx-provider",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "gcpx-provider"
 version = "0.1.0"
 dependencies = [

@@ -196,11 +196,42 @@ pub async fn delete_dataset<C: BqOps>(
 ) -> Result<Response<()>, Status> {
     let (proj, ds_id) = parse_resource_id_2(&req.id).map_err(Status::invalid_argument)?;
 
-    gcpx_core::lifecycle::verified_delete(
-        client.delete_dataset(proj, ds_id),
+    // BigQuery refuses to delete a dataset that still holds tables unless the
+    // cascade is requested. Defaulting this to false matches the rest of the
+    // ecosystem and keeps `pulumi destroy` from silently dropping data the
+    // stack does not manage.
+    let delete_contents = req
+        .old_inputs
+        .as_ref()
+        .or(req.properties.as_ref())
+        .and_then(|s| gcpx_core::prost_util::get_bool(&s.fields, "deleteContentsOnDestroy"))
+        .unwrap_or(false);
+
+    match gcpx_core::lifecycle::verified_delete(
+        client.delete_dataset(proj, ds_id, delete_contents),
         || client.get_dataset(proj, ds_id),
         10,
         std::time::Duration::from_secs(1),
     )
     .await
+    {
+        Ok(resp) => Ok(resp),
+        // The raw API error here says the dataset "still contains tables",
+        // which is true but does not say what to do about it.
+        Err(status) if !delete_contents && mentions_non_empty(status.message()) => {
+            Err(Status::failed_precondition(format!(
+                "dataset '{ds_id}' still contains tables, so it was not deleted. \
+                 Either delete those resources first, or set \
+                 'deleteContentsOnDestroy: true' on this Dataset to have the \
+                 provider remove them with it."
+            )))
+        }
+        Err(status) => Err(status),
+    }
+}
+
+/// Whether an API message is BigQuery refusing to drop a non-empty dataset.
+fn mentions_non_empty(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    m.contains("still contains") || m.contains("not empty") || m.contains("deletecontents")
 }

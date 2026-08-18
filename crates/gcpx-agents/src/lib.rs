@@ -18,6 +18,8 @@ pub mod api_body;
 pub mod chat;
 pub mod grounding;
 pub mod handlers;
+#[cfg(feature = "mock")]
+pub mod mock;
 pub mod ops;
 pub mod parse;
 pub mod types;

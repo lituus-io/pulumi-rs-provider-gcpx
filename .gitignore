@@ -19,6 +19,9 @@ venv/
 *.egg-info/
 .pytest_cache/
 python/dist/
+# setuptools staging. This was tracked once, binary and all, which put a 4.7 MB
+# copy of the plugin in the history of a repo that builds it from source.
+python/build/
 
 # Bundled binary in the Python package (populated at build time)
 python/python/pulumi_rs_provider_gcpx/bin/

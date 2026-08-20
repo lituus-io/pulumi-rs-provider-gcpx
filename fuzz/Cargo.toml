@@ -1,0 +1,50 @@
+# Copyright: lituus-io, all rights reserved.
+# Author: terekete <spicyzhug@gmail.com>
+
+[package]
+name = "gcpx-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+gcpx-dbt = { path = "../crates/gcpx-dbt" }
+gcpx-agents = { path = "../crates/gcpx-agents" }
+gcpx-core = { path = "../crates/gcpx-core" }
+
+# Kept out of the workspace so a sanitiser build never contaminates it.
+[workspace]
+
+[[bin]]
+name = "fuzz_dbt_pipeline"
+path = "fuzz_targets/fuzz_dbt_pipeline.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_dbt_scanner"
+path = "fuzz_targets/fuzz_dbt_scanner.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_macro_expansion"
+path = "fuzz_targets/fuzz_macro_expansion.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_chat_frames"
+path = "fuzz_targets/fuzz_chat_frames.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_identifier_escaping"
+path = "fuzz_targets/fuzz_identifier_escaping.rs"
+test = false
+doc = false

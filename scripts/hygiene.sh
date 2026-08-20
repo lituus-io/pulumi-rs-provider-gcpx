@@ -13,11 +13,14 @@ FORBIDDEN='(^|[^a-z])(bli)([^a-z]|$)|anthropic|cl'"aude"'|te'"lus"'|mark\.gates'
 
 fail=0
 
-echo "==> Scanning tree"
-if matches=$(grep -rniE "$FORBIDDEN" . \
-      --exclude-dir=.git \
-      --exclude-dir=target \
-      --exclude=hygiene.sh 2>/dev/null); then
+# Only tracked text files: those are what ships and what the history carries.
+# Scanning the working tree instead picks up build output — a compiled binary
+# will match almost any short token by accident — and reports a failure that
+# says nothing about the source.
+echo "==> Scanning tracked files"
+if matches=$(git ls-files -z \
+      | grep -zZv '^scripts/hygiene\.sh$' \
+      | xargs -0 grep -IniE "$FORBIDDEN" 2>/dev/null); then
   echo "FAIL: forbidden token(s) found in tree:"
   echo "$matches"
   fail=1

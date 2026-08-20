@@ -71,4 +71,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Wall-clock benchmarks are noisy on shared runners; allocation counts are
       # deterministic, so memory growth is gated here rather than in criterion.
-      - run: cargo test --workspace --locked --features alloc-ceilings alloc_ceiling
+      #
+      # The feature installs a counting global allocator, which is why it is not
+      # on by default: every other test binary in the workspace would inherit
+      # it. The counter is process-wide, so the suite is one sequential test.
+      - run: |
+          cargo test --locked -p gcpx-live-tests \
+            --features alloc-ceilings --test alloc_ceilings -- --nocapture

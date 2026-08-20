@@ -166,6 +166,40 @@ Found by deploying a Dataproc Serverless batch, which had never been run:
 Verified live: a PySpark batch submitted through `IngestJob` reaches Dataproc
 Serverless, runs, and succeeds, and the stack previews clean afterwards.
 
+### Build and CI
+
+The release binary is 2.85 MiB, down from 4.51 MiB — 36.8% smaller. Almost all
+of it is code that runs once per request: TLS, HTTP/2, gRPC, the generated proto
+types. Compiling that bulk for size costs nothing that can be measured. The dbt
+template pipeline is the exception and is the one measured hot path, so
+`gcpx-dbt` and `gcpx-core` keep full optimisation via per-package overrides:
+built for size they run about three times slower — scanning drops from ~1.4
+GiB/s to ~0.5 — to save tens of kilobytes. CI now gates the size rather than
+merely reporting it, so a dependency cannot quietly add a megabyte.
+
+Three CI jobs referenced things that did not exist and would have failed on
+their first run:
+
+- The `conformance` job ran `--test conformance` against an empty directory and
+  no declared target. The suite now exists and exercises the real binary: it
+  launches the plugin, reads the port from stdout, and asserts the handshake
+  works with no credentials present, that the schema survives the gRPC round
+  trip, and that every resource token the schema advertises is dispatchable.
+- The `allocations` job passed `--features alloc-ceilings`, which no crate
+  declared. There is now a counting allocator behind that feature, asserting
+  that scanning does not allocate and that preprocessing allocates per pass
+  rather than per reference — measured at 7 allocations whether a model holds 8
+  references or 256.
+- `fuzz.yml` pointed at a `fuzz/` directory holding nothing. Five targets now
+  cover the surfaces that take arbitrary input: the template pipeline, the
+  scanner, macro expansion, the chat stream parser, and identifier quoting.
+
+Also: `python/build/` was tracked, which put a 4.7 MB copy of the plugin binary
+in the history of a repository that builds it from source. It is untracked and
+ignored. The hygiene scan that should have caught tokens in it was reading the
+working tree including build output — a compiled binary matches almost any short
+token by accident — and now reads tracked text files, which is what ships.
+
 ### Known gaps
 
 - `schemaRelationships` and `userFunctions` are not sent. Both message names

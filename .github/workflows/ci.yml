@@ -128,7 +128,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # Asserts the plugin protocol surface: port-on-stdout handshake, the full
-      # resource-token set, >4 MiB GetSchema round-trip, and reported version.
+      # resource-token set, the GetSchema round-trip, and the reported version.
+      #
+      # The test launches the real binary, so it has to exist first — `cargo
+      # test` does not build another package's binary for you, and without this
+      # the suite fails on a missing file rather than on anything it is testing.
+      - run: cargo build --locked -p pulumi-resource-gcpx
       - run: cargo test --locked --test conformance
 
   python-test:
@@ -164,8 +169,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: size
-      # Reports the size so a dependency can never silently double the binary
-      # unnoticed. Informational: it prints, it does not gate.
+      # The plugin is downloaded and launched per deploy, so its size is a cost
+      # every user pays. A ceiling is set slightly above the current size: it
+      # will not notice a few hundred bytes, which is noise, and will notice a
+      # dependency arriving that adds a megabyte. Raising it is fine — doing so
+      # deliberately, in the commit that earns it, is the point.
       #
       # RUSTFLAGS is cleared deliberately: an env-level RUSTFLAGS makes cargo
       # ignore `target.*.rustflags` from .cargo/config.toml, so the rest of CI
@@ -177,13 +185,21 @@ jobs:
         run: |
           cargo build --release --locked -p pulumi-resource-gcpx
           size=$(stat -c%s target/release/pulumi-resource-gcpx)
+          ceiling=3355443  # 3.2 MiB
           {
             echo "### Release binary size"
             echo ""
-            echo "| Binary | Bytes | MiB |"
-            echo "|---|---:|---:|"
-            printf '| pulumi-resource-gcpx | %s | %.2f |\n' "$size" "$(echo "scale=4; $size/1048576" | bc)"
+            echo "| Binary | Bytes | MiB | Ceiling |"
+            echo "|---|---:|---:|---:|"
+            printf '| pulumi-resource-gcpx | %s | %.2f | %.2f |\n' \
+              "$size" \
+              "$(echo "scale=4; $size/1048576" | bc)" \
+              "$(echo "scale=4; $ceiling/1048576" | bc)"
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$size" -gt "$ceiling" ]; then
+            echo "::error::binary is $size bytes, over the $ceiling ceiling"
+            exit 1
+          fi
 
   cross-check:
     name: Cross-compile check

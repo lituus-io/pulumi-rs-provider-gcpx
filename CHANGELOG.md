@@ -177,6 +177,29 @@ built for size they run about three times slower — scanning drops from ~1.4
 GiB/s to ~0.5 — to save tens of kilobytes. CI now gates the size rather than
 merely reporting it, so a dependency cannot quietly add a megabyte.
 
+The coverage gate was set to 85% and the tree has never reached it. The first
+run that actually executed measured 77.89%, with several BigQuery handler
+modules at 0% because nothing outside the live suite touches them and that does
+not run in CI. The gate is now the measured floor: it cannot close the gap, but
+it stops the gap widening, and a check that always fails is a check nobody
+reads. Raising it means writing tests for those handlers.
+
+Four more failures only appeared once the workflows genuinely ran — three had
+been latent in them from the start:
+
+- `cargo bench --workspace` runs the plain libtest harness of every crate with
+  no criterion bench, and those reject `--save-baseline`; the run died on the
+  first one. Only the criterion target is named now.
+- `shasum` ships with macOS and most Linux images but not the Windows runner,
+  where release packaging died after the build had already succeeded.
+- The binary-size ceiling had been calibrated on a developer machine. The same
+  source links materially larger on Linux — 4.28 MiB against 2.85 — so the gate
+  failed a build that had regressed nothing.
+- And the conformance suite, newly added here, runs under `cargo test
+  --workspace`, which does not build another package's binary. It is ignored by
+  default now and the conformance job asks for it explicitly, having built what
+  it needs.
+
 Three CI jobs referenced things that did not exist and would have failed on
 their first run:
 

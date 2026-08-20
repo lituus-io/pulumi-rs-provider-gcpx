@@ -28,5 +28,7 @@ thiserror = { workspace = true, optional = true }
 
 [dev-dependencies]
 gcpx-scheduler = { path = ".", features = ["mock"] }
-tokio = { workspace = true, features = ["test-util"] }
+pulumi-rs-yaml-proto = { workspace = true }
+prost-types = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
 proptest = { workspace = true }

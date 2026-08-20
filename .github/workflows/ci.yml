@@ -117,16 +117,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
-      # A ratchet, not an aspiration. The gate was set at 85% and the tree has
-      # never reached it — the first run that actually executed measured 77.89%,
-      # with several BigQuery handler modules at 0% because nothing but the live
-      # suite touches them and that does not run here.
+      # 85% is met rather than aspired to now: the BigQuery, agent, snapshot
+      # and scheduler handlers were covered directly, which took the tree from
+      # 77.89% to 85.72%. Measured with roughly 0.7 points of headroom, which is
+      # enough that ordinary refactoring will not trip it and a module losing
+      # its tests will.
       #
-      # 85% named a goal and gated nothing, because a check that always fails is
-      # a check nobody reads. This number is the measured floor: it cannot catch
-      # up on the gap, but it does stop the gap widening. Raise it whenever the
-      # real figure rises — that is the only way it moves.
-      - run: cargo llvm-cov --workspace --locked --fail-under-lines 77 --summary-only
+      # Raising this further means covering the `ops.rs` modules, which are the
+      # HTTP clients: they need a stubbed transport rather than a client double,
+      # and are otherwise exercised only by the live suite.
+      - run: cargo llvm-cov --workspace --locked --fail-under-lines 85 --summary-only
 
   conformance:
     name: Conformance

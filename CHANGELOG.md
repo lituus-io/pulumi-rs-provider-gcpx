@@ -177,12 +177,29 @@ built for size they run about three times slower — scanning drops from ~1.4
 GiB/s to ~0.5 — to save tens of kilobytes. CI now gates the size rather than
 merely reporting it, so a dependency cannot quietly add a megabyte.
 
-The coverage gate was set to 85% and the tree has never reached it. The first
+The coverage gate was set to 85% and the tree had never reached it — the first
 run that actually executed measured 77.89%, with several BigQuery handler
-modules at 0% because nothing outside the live suite touches them and that does
-not run in CI. The gate is now the measured floor: it cannot close the gap, but
-it stops the gap widening, and a check that always fails is a check nobody
-reads. Raising it means writing tests for those handlers.
+modules at 0% because nothing outside the live suite touched them and that does
+not run in CI. Those handlers are covered now, directly, against the client
+doubles: BigQuery dataset, table, routine and schema; the five agent resources;
+snapshots; and scheduled SQL. Full lifecycles — Check, Create, Read, Update,
+Delete — plus the paths that only appear when something goes wrong: an adopt on
+409, a delete of something already gone, a rollback when the second half of a
+paired resource fails.
+
+That took the tree from 77.89% to 85.72%, so the gate is met rather than
+aspired to. Raising it further means covering the `ops.rs` modules, which are
+HTTP clients and need a stubbed transport rather than a client double.
+
+Writing those tests turned up two things worth recording. Schema evolution is
+declarative, not inferred: listing a new column does not add it, `alter: insert`
+does, which is what makes re-applying an unchanged schema a no-op. And deleting
+a resource that is already gone fails, across every resource — `verified_delete`
+propagates the delete error and only treats a 404 from the *poll* as
+confirmation. That means a resource removed out of band blocks `pulumi destroy`
+until state is edited by hand. The current behaviour is pinned by a test so a
+change to it is deliberate; whether it should change is a decision about destroy
+semantics across the provider.
 
 Four more failures only appeared once the workflows genuinely ran — three had
 been latent in them from the start:

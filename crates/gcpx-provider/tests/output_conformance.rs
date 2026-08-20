@@ -18,6 +18,7 @@ use std::collections::BTreeSet;
 
 use gcpx_agents::handlers::*;
 use gcpx_agents::mock::MockAgentClient;
+use gcpx_bq::mock::MockBqClient;
 use prost_types::{value::Kind, ListValue, Struct, Value};
 use pulumi_rs_yaml_proto::pulumirpc;
 use serde_json::Value as Json;
@@ -231,4 +232,115 @@ async fn memory_returns_what_the_schema_promises() {
     )
     .await;
     assert_outputs_match_schema("gcpx:agent/memory:Memory", &out, &[]);
+}
+
+// ── BigQuery and dbt ────────────────────────────────────────────────────────
+//
+// The same question for the resources a stack actually starts with. These go
+// through Check first, as the engine does, so any default the provider intends
+// to apply is applied before create sees the inputs.
+
+async fn checked_create<F, G, FutC, FutR>(check: F, create: G, inputs: Struct, what: &str) -> Struct
+where
+    F: FnOnce(pulumirpc::CheckRequest) -> FutC,
+    G: FnOnce(pulumirpc::CreateRequest) -> FutR,
+    FutC: std::future::Future<
+        Output = Result<tonic::Response<pulumirpc::CheckResponse>, tonic::Status>,
+    >,
+    FutR: std::future::Future<
+        Output = Result<tonic::Response<pulumirpc::CreateResponse>, tonic::Status>,
+    >,
+{
+    let checked = check(pulumirpc::CheckRequest {
+        news: Some(inputs),
+        ..Default::default()
+    })
+    .await
+    .unwrap_or_else(|e| panic!("{what}: check failed: {e}"))
+    .into_inner();
+    assert!(
+        checked.failures.is_empty(),
+        "{what}: check rejected the inputs: {:?}",
+        checked.failures
+    );
+    create(pulumirpc::CreateRequest {
+        properties: checked.inputs,
+        preview: false,
+        ..Default::default()
+    })
+    .await
+    .unwrap_or_else(|e| panic!("{what}: create failed: {e}"))
+    .into_inner()
+    .properties
+    .unwrap_or_else(|| panic!("{what}: create returned no properties"))
+}
+
+#[tokio::test]
+async fn dataset_returns_what_the_schema_promises() {
+    let c = MockBqClient::default();
+    let out = checked_create(
+        |r| gcpx_bq::dataset::handlers::check_dataset(&c, r),
+        |r| gcpx_bq::dataset::handlers::create_dataset(&c, r),
+        st(vec![
+            ("project", v("p")),
+            ("datasetId", v("d")),
+            ("location", v("US")),
+            ("description", v("desc")),
+        ]),
+        "dataset",
+    )
+    .await;
+    // `defaultTableExpirationMs` and friends only exist when the caller set
+    // them; this asserts on what a minimal dataset must still carry.
+    for key in ["project", "datasetId", "location", "description"] {
+        assert!(
+            out.fields.contains_key(key),
+            "dataset dropped {key} from its outputs: {:?}",
+            out.fields.keys().collect::<Vec<_>>()
+        );
+    }
+    let declared = declared_outputs("gcpx:bigquery/dataset:Dataset");
+    let undeclared: Vec<&String> = out
+        .fields
+        .keys()
+        .filter(|k| !declared.contains(*k))
+        .collect();
+    assert!(
+        undeclared.is_empty(),
+        "dataset stored {undeclared:?}, which the schema does not declare"
+    );
+}
+
+#[tokio::test]
+async fn table_returns_what_the_schema_promises() {
+    let c = MockBqClient::default();
+    let out = checked_create(
+        |r| gcpx_bq::table::handlers::check_table(&c, r),
+        |r| gcpx_bq::table::handlers::create_table(&c, r),
+        st(vec![
+            ("project", v("p")),
+            ("dataset", v("d")),
+            ("tableId", v("t")),
+            ("description", v("desc")),
+        ]),
+        "table",
+    )
+    .await;
+    for key in ["project", "dataset", "tableId", "description"] {
+        assert!(
+            out.fields.contains_key(key),
+            "table dropped {key} from its outputs: {:?}",
+            out.fields.keys().collect::<Vec<_>>()
+        );
+    }
+    let declared = declared_outputs("gcpx:bigquery/table:Table");
+    let undeclared: Vec<&String> = out
+        .fields
+        .keys()
+        .filter(|k| !declared.contains(*k))
+        .collect();
+    assert!(
+        undeclared.is_empty(),
+        "table stored {undeclared:?}, which the schema does not declare"
+    );
 }

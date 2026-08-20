@@ -10,7 +10,14 @@
 //! larger than tonic's default cap, a version string that drifts from the
 //! package — and each one breaks every deploy rather than one resource.
 //!
-//! So this builds the binary, runs it, and talks to it.
+//! So this runs the real binary and talks to it — which means the binary has to
+//! exist. `cargo test --workspace` does not build another package's binary, so
+//! these are `#[ignore]`d and run explicitly by the conformance job, which
+//! builds it first. Without that they fail on every platform for a missing
+//! file, saying nothing about the protocol they exist to check.
+//!
+//!     cargo build -p pulumi-resource-gcpx
+//!     cargo test --test conformance -- --ignored
 
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
@@ -96,6 +103,7 @@ async fn connect(
 /// first would put a network round-trip in front of every single invocation,
 /// and would make the plugin unusable offline — which is how validation runs.
 #[tokio::test]
+#[ignore = "needs the plugin binary built; run via the conformance job"]
 async fn the_plugin_prints_a_port_and_serves_without_credentials() {
     let plugin = start();
     let mut client = connect(&plugin).await;
@@ -114,6 +122,7 @@ async fn the_plugin_prints_a_port_and_serves_without_credentials() {
 /// not raised is opaque: "decoded message length too large", surfacing during
 /// validation rather than deploy.
 #[tokio::test]
+#[ignore = "needs the plugin binary built; run via the conformance job"]
 async fn the_schema_survives_the_grpc_round_trip() {
     let plugin = start();
     let mut client = connect(&plugin).await;
@@ -141,6 +150,7 @@ async fn the_schema_survives_the_grpc_round_trip() {
 /// can write into a stack and never deploy; the reverse is a resource that
 /// exists but that no stack can reference. Both are silent until someone tries.
 #[tokio::test]
+#[ignore = "needs the plugin binary built; run via the conformance job"]
 async fn every_advertised_resource_token_is_dispatchable() {
     let plugin = start();
     let mut client = connect(&plugin).await;

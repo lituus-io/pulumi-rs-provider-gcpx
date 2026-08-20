@@ -34,15 +34,18 @@ jobs:
 
       # The baseline is the merge-base, measured on this same runner. Comparing
       # against a stored absolute number would just measure runner variance.
+      # Named explicitly rather than `--workspace`: that also runs the plain
+      # libtest harness of every crate without a criterion bench, and those do
+      # not understand `--save-baseline` — the run dies on the first one.
       - name: Measure baseline (merge-base)
         if: github.event_name == 'pull_request'
         run: |
           git checkout --detach ${{ github.event.pull_request.base.sha }}
-          cargo bench --workspace --locked -- --save-baseline base
+          cargo bench -p gcpx-dbt --bench render_bench --locked -- --save-baseline base
           git checkout --force ${{ github.sha }}
 
       - name: Measure current
-        run: cargo bench --workspace --locked -- --save-baseline current
+        run: cargo bench -p gcpx-dbt --bench render_bench --locked -- --save-baseline current
 
       - name: Compare and gate
         if: github.event_name == 'pull_request'

@@ -75,10 +75,12 @@ pub async fn diff_table_schema<C: BqOps>(
     _client: &C,
     req: pulumirpc::DiffRequest,
 ) -> Result<Response<pulumirpc::DiffResponse>, Status> {
-    let olds = req
-        .olds
-        .as_ref()
-        .ok_or_else(|| Status::invalid_argument("missing olds"))?;
+    // Compare inputs with inputs: the stored outputs carry fields the service
+    // assigns, which no incoming input can match.
+    let prev =
+        gcpx_core::prost_util::old_inputs_or_outputs(req.old_inputs.as_ref(), req.olds.as_ref())
+            .ok_or_else(|| Status::invalid_argument("missing olds"))?;
+    let olds = &prev;
     let news = req
         .news
         .as_ref()

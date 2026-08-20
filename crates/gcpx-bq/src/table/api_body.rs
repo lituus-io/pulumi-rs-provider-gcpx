@@ -122,10 +122,20 @@ pub fn build_patch_body(inputs: &TableInputs<'_>, update_keys: &[&str]) -> serde
                 body = body.bool_opt("deletionProtection", inputs.deletion_protection);
             }
             "clusterings" => {
-                body = body.object(
-                    "clustering",
-                    serde_json::json!({ "fields": inputs.clusterings }),
-                );
+                // `{"fields": []}` is not "no clustering" to BigQuery — it is
+                // clustering switched on with nothing to cluster by, which it
+                // rejects outright ("Clustering is enabled but no fields were
+                // specified"). Clearing the field is spelled `null`, and that
+                // is also what makes adopting an existing clustered table
+                // converge on the inputs rather than fail.
+                body = if inputs.clusterings.is_empty() {
+                    body.object("clustering", serde_json::Value::Null)
+                } else {
+                    body.object(
+                        "clustering",
+                        serde_json::json!({ "fields": inputs.clusterings }),
+                    )
+                };
             }
             "storageBillingModel" => {
                 body = body.str_opt("storageBillingModel", inputs.storage_billing_model);
@@ -139,6 +149,33 @@ pub fn build_patch_body(inputs: &TableInputs<'_>, update_keys: &[&str]) -> serde
 
 #[cfg(test)]
 mod tests {
+
+    /// Adopting an existing table sends a patch for every field, including the
+    /// ones the stack never set. An empty clustering list has to become `null`
+    /// there: `{"fields": []}` reads to BigQuery as clustering switched on with
+    /// nothing to cluster by, and it rejects the request — which surfaced as a
+    /// deploy that failed only when the table already existed.
+    #[test]
+    fn an_empty_clustering_list_clears_rather_than_enables() {
+        let inputs = base();
+        let v = build_patch_body(&inputs, &["clusterings"]);
+        assert!(
+            v.get("clustering").is_some_and(serde_json::Value::is_null),
+            "expected clustering to be cleared with null, got {v}"
+        );
+    }
+
+    #[test]
+    fn a_populated_clustering_list_is_sent_as_fields() {
+        let inputs = TableInputs {
+            clusterings: vec!["region", "ordered_at"],
+            ..base()
+        };
+        let v = build_patch_body(&inputs, &["clusterings"]);
+        assert_eq!(v["clustering"]["fields"][0], "region");
+        assert_eq!(v["clustering"]["fields"][1], "ordered_at");
+    }
+
     use super::*;
     use std::collections::BTreeMap;
 

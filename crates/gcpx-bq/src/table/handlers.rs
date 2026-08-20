@@ -36,10 +36,16 @@ pub async fn diff_table<C: BqOps>(
     _client: &C,
     req: pulumirpc::DiffRequest,
 ) -> Result<Response<pulumirpc::DiffResponse>, Status> {
-    let olds = req
-        .olds
-        .as_ref()
-        .ok_or_else(|| Status::invalid_argument("missing olds"))?;
+    // Compare inputs with inputs. `olds` is what the provider stored, which
+    // includes fields the service assigns and defaults it applied — none of
+    // which an incoming input can match, so comparing against it reports a
+    // change on every preview forever. `old_inputs` is what the engine provides
+    // for exactly this; the outputs remain the fallback for state written
+    // before it existed.
+    let prev =
+        gcpx_core::prost_util::old_inputs_or_outputs(req.old_inputs.as_ref(), req.olds.as_ref())
+            .ok_or_else(|| Status::invalid_argument("missing olds"))?;
+    let olds = &prev;
     let news = req
         .news
         .as_ref()

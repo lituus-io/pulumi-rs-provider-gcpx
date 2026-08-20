@@ -1,8 +1,9 @@
 // Copyright: lituus-io, all rights reserved.
 // Author: terekete <spicyzhug@gmail.com>
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
+use gcpx_core::prost_util::{differing_fields, old_inputs_or_outputs};
 use pulumi_rs_yaml_proto::pulumirpc;
 use tonic::{Response, Status};
 
@@ -65,16 +66,9 @@ pub async fn diff_dbt_project<C: BqOps>(
         "declaredMacros",
         "vars",
     ];
-    let changes = if fields_equal(req.olds.as_ref(), req.news.as_ref(), input_keys) {
-        pulumirpc::diff_response::DiffChanges::DiffNone as i32
-    } else {
-        pulumirpc::diff_response::DiffChanges::DiffSome as i32
-    };
-
-    Ok(Response::new(pulumirpc::DiffResponse {
-        changes,
-        ..Default::default()
-    }))
+    let prev = old_inputs_or_outputs(req.old_inputs.as_ref(), req.olds.as_ref());
+    let changed = differing_fields(prev.as_ref(), req.news.as_ref(), input_keys);
+    Ok(Response::new(diff_response(&changed)))
 }
 
 pub async fn create_dbt_project<C: BqOps>(
@@ -183,16 +177,9 @@ pub async fn diff_dbt_macro<C: BqOps>(
     req: pulumirpc::DiffRequest,
 ) -> Result<Response<pulumirpc::DiffResponse>, Status> {
     let input_keys: &[&str] = &["name", "sql", "args"];
-    let changes = if fields_equal(req.olds.as_ref(), req.news.as_ref(), input_keys) {
-        pulumirpc::diff_response::DiffChanges::DiffNone as i32
-    } else {
-        pulumirpc::diff_response::DiffChanges::DiffSome as i32
-    };
-
-    Ok(Response::new(pulumirpc::DiffResponse {
-        changes,
-        ..Default::default()
-    }))
+    let prev = old_inputs_or_outputs(req.old_inputs.as_ref(), req.olds.as_ref());
+    let changed = differing_fields(prev.as_ref(), req.news.as_ref(), input_keys);
+    Ok(Response::new(diff_response(&changed)))
 }
 
 pub async fn create_dbt_macro<C: BqOps>(
@@ -416,46 +403,68 @@ pub async fn diff_dbt_model<C: BqOps>(
     _client: &C,
     req: pulumirpc::DiffRequest,
 ) -> Result<Response<pulumirpc::DiffResponse>, Status> {
-    // Compare only stable input keys — exclude context/modelRefs which have
-    // structural noise (computed fields, field ordering differences).
+    // Compare only stable input keys — context and modelRefs carry computed
+    // fields and are compared separately, on the parts that mean something.
+    //
+    // `tableId` is deliberately absent. It means two different things on the two
+    // sides of this comparison: as an input it selects MERGE-into-an-existing
+    // table, as an output it is the clean table name. Comparing them matches a
+    // mode switch against a name, which is never equal.
     let stable_keys: &[&str] = &[
         "name",
         "sql",
         "macros",
-        "tableId",
         "schema",
         "options",
         "maxBytesBilled",
     ];
-    let stable_equal = fields_equal(req.olds.as_ref(), req.news.as_ref(), stable_keys);
-    let context_eq = context_fields_equal(req.olds.as_ref(), req.news.as_ref());
-    let model_refs_eq = model_refs_equal(req.olds.as_ref(), req.news.as_ref());
+    let prev = old_inputs_or_outputs(req.old_inputs.as_ref(), req.olds.as_ref());
+    let mut changed = differing_fields(prev.as_ref(), req.news.as_ref(), stable_keys);
 
-    let changes = if stable_equal && context_eq && model_refs_eq {
+    // Only meaningful when both sides are inputs; against stored outputs the
+    // input flag has no counterpart to compare with.
+    if req.old_inputs.is_some()
+        && !differing_fields(prev.as_ref(), req.news.as_ref(), &["tableId"]).is_empty()
+    {
+        changed.push("tableId");
+    }
+    if !context_fields_equal(prev.as_ref(), req.news.as_ref()) {
+        changed.push("context");
+    }
+    if !model_refs_equal(prev.as_ref(), req.news.as_ref()) {
+        changed.push("modelRefs");
+    }
+
+    // Update rather than UpdateReplace — CREATE OR REPLACE handles in place.
+    Ok(Response::new(diff_response(&changed)))
+}
+
+/// Builds a diff response naming exactly the properties that changed.
+fn diff_response(changed: &[&str]) -> pulumirpc::DiffResponse {
+    let changes = if changed.is_empty() {
         pulumirpc::diff_response::DiffChanges::DiffNone as i32
     } else {
         pulumirpc::diff_response::DiffChanges::DiffSome as i32
     };
-
-    // Use Update (not UpdateReplace) — CREATE OR REPLACE handles in-place updates.
-    let mut detailed_diff = HashMap::new();
-    if changes == pulumirpc::diff_response::DiffChanges::DiffSome as i32 {
-        detailed_diff.insert(
-            "sql".to_owned(),
-            pulumirpc::PropertyDiff {
-                kind: pulumirpc::property_diff::Kind::Update as i32,
-                input_diff: true,
-            },
-        );
-    }
-
-    Ok(Response::new(pulumirpc::DiffResponse {
+    let detailed_diff = changed
+        .iter()
+        .map(|k| {
+            (
+                (*k).to_owned(),
+                pulumirpc::PropertyDiff {
+                    kind: pulumirpc::property_diff::Kind::Update as i32,
+                    input_diff: true,
+                },
+            )
+        })
+        .collect();
+    pulumirpc::DiffResponse {
         changes,
-        replaces: Vec::new(), // No replaces — always in-place update.
+        replaces: Vec::new(),
         has_detailed_diff: true,
         detailed_diff,
         ..Default::default()
-    }))
+    }
 }
 
 pub async fn create_dbt_model<C: BqOps>(
@@ -1133,19 +1142,6 @@ fn parse_resource_options(
     })
 }
 
-/// Compare only specified input fields between olds and news structs.
-fn fields_equal(
-    olds: Option<&prost_types::Struct>,
-    news: Option<&prost_types::Struct>,
-    keys: &[&str],
-) -> bool {
-    match (olds, news) {
-        (Some(o), Some(n)) => keys.iter().all(|k| o.fields.get(*k) == n.fields.get(*k)),
-        (None, None) => true,
-        _ => false,
-    }
-}
-
 /// Compare only semantically meaningful context fields (gcpProject, dataset).
 /// Ignores structural noise like extra fields from re-reads.
 fn context_fields_equal(
@@ -1731,6 +1727,133 @@ mod tests {
         assert!(failures
             .iter()
             .any(|f| f.reason.contains("references unknown model")));
+    }
+
+    /// Deploy, change nothing, preview again: the answer must be "no diff".
+    ///
+    /// This is the property a user checks constantly and the one a provider is
+    /// most likely to get wrong, because `Diff` compares the *outputs* of the
+    /// last deploy against the *inputs* of the next one. Any field the provider
+    /// computes — an optional input with a default, anything derived — is
+    /// present on one side and absent on the other, and reads as a change
+    /// forever. Driving it through the real create path rather than hand-built
+    /// structs is the point: that is where the defaults are applied.
+    fn assert_no_diff(resp: &pulumirpc::DiffResponse, what: &str) {
+        assert_eq!(
+            resp.changes,
+            pulumirpc::diff_response::DiffChanges::DiffNone as i32,
+            "{what}: an unchanged stack reported a diff on {:?}",
+            resp.detailed_diff.keys().collect::<Vec<_>>()
+        );
+    }
+
+    /// Helper: run create and hand back the outputs it stored.
+    async fn create_model_outputs(
+        client: &MockBqClient,
+        props: &prost_types::Struct,
+    ) -> prost_types::Struct {
+        create_dbt_model(
+            client,
+            pulumirpc::CreateRequest {
+                properties: Some(props.clone()),
+                preview: false,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .into_inner()
+        .properties
+        .expect("create must return properties")
+    }
+
+    #[tokio::test]
+    async fn model_reports_no_diff_when_nothing_changed() {
+        let client = mock_client();
+        let ctx = make_context_value("p", "d", vec!["m"]);
+        let props = make_model_inputs("m", "SELECT 1", ctx);
+        let outs = create_model_outputs(&client, &props).await;
+
+        let resp = diff_dbt_model(
+            &client,
+            pulumirpc::DiffRequest {
+                olds: Some(outs),
+                news: Some(props.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+        assert_no_diff(&resp, "dbt model");
+    }
+
+    /// The same, with every optional input left unset — which is how the
+    /// defaults that cause the problem get applied in the first place.
+    #[tokio::test]
+    async fn model_with_explicit_table_id_also_reports_no_diff() {
+        let client = mock_client();
+        let ctx = make_context_value("p", "d", vec!["m"]);
+        let mut props = make_model_inputs("m", "SELECT 1", ctx);
+        props
+            .fields
+            .insert("tableId".to_owned(), prost_string("custom_table"));
+        let outs = create_model_outputs(&client, &props).await;
+
+        let resp = diff_dbt_model(
+            &client,
+            pulumirpc::DiffRequest {
+                olds: Some(outs),
+                news: Some(props),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .into_inner();
+        assert_eq!(
+            resp.changes,
+            pulumirpc::diff_response::DiffChanges::DiffNone as i32,
+            "an explicit tableId reported a diff: {:?}",
+            resp.detailed_diff.keys().collect::<Vec<_>>()
+        );
+    }
+
+    /// A real change must still be reported, and reported against the property
+    /// that actually changed — a diff that always blames `sql` sends whoever
+    /// reads it to the wrong place.
+    #[tokio::test]
+    async fn a_real_change_names_the_property_that_changed() {
+        let client = mock_client();
+        let ctx = make_context_value("p", "d", vec!["m"]);
+        let olds = make_model_inputs("m", "SELECT 1", ctx.clone());
+        let olds = create_model_outputs(&client, &olds).await;
+
+        let mut news = make_model_inputs("m", "SELECT 1", ctx);
+        news.fields
+            .insert("maxBytesBilled".to_owned(), prost_string("1000"));
+
+        let resp = diff_dbt_model(
+            &client,
+            pulumirpc::DiffRequest {
+                olds: Some(olds),
+                news: Some(news),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .into_inner();
+        assert_eq!(
+            resp.changes,
+            pulumirpc::diff_response::DiffChanges::DiffSome as i32
+        );
+        assert!(
+            resp.detailed_diff.contains_key("maxBytesBilled"),
+            "the diff named {:?}, not the property that changed",
+            resp.detailed_diff.keys().collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]

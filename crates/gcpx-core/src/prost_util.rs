@@ -159,6 +159,51 @@ pub fn resource_type_from_urn(urn: &str) -> &str {
     urn
 }
 
+/// The inputs a resource was last created or updated with.
+///
+/// `Diff` receives three structs: `olds` (the outputs the provider stored),
+/// `news` (the inputs about to be applied), and `old_inputs` (the inputs that
+/// produced those outputs). Comparing `news` against `olds` is the tempting
+/// mistake — it puts every computed field on one side of the comparison and
+/// nothing on the other, so any property the provider derives reads as a
+/// change on every preview, forever.
+///
+/// Compare inputs with inputs. `old_inputs` is empty only when the engine
+/// predates the field or the state was written by an older provider, so the
+/// outputs remain the fallback rather than the default.
+pub fn old_inputs_or_outputs(
+    old_inputs: Option<&prost_types::Struct>,
+    olds: Option<&prost_types::Struct>,
+) -> Option<prost_types::Struct> {
+    match old_inputs {
+        Some(s) if !s.fields.is_empty() => Some(s.clone()),
+        _ => olds.cloned(),
+    }
+}
+
+/// Names of the fields in `keys` that differ between two structs.
+///
+/// Returning the names rather than a bool is what lets a diff report the
+/// property that actually changed. A detailed diff that always names the same
+/// property sends whoever reads it to the wrong place — and hides the real one.
+pub fn differing_fields<'k>(
+    olds: Option<&prost_types::Struct>,
+    news: Option<&prost_types::Struct>,
+    keys: &[&'k str],
+) -> Vec<&'k str> {
+    match (olds, news) {
+        (Some(o), Some(n)) => keys
+            .iter()
+            .filter(|k| o.fields.get(**k) != n.fields.get(**k))
+            .copied()
+            .collect(),
+        (None, None) => Vec::new(),
+        // One side absent entirely: treat every compared key as changed rather
+        // than guessing which.
+        _ => keys.to_vec(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

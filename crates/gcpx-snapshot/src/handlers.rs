@@ -71,16 +71,20 @@ pub async fn diff_snapshot<C: BqOps + SchedulerOps>(
     _client: &C,
     req: pulumirpc::DiffRequest,
 ) -> Result<Response<pulumirpc::DiffResponse>, Status> {
-    let olds = req
-        .olds
-        .as_ref()
-        .ok_or_else(|| Status::invalid_argument("missing olds"))?;
+    // Compare inputs with inputs. `olds` holds the outputs the provider stored,
+    // which carry computed fields the incoming inputs cannot have — comparing
+    // against those reports a change on every preview, forever. `old_inputs` is
+    // what the engine provides for exactly this, and falls back to the outputs
+    // only for state written before it existed.
+    let prev =
+        gcpx_core::prost_util::old_inputs_or_outputs(req.old_inputs.as_ref(), req.olds.as_ref())
+            .ok_or_else(|| Status::invalid_argument("missing olds"))?;
     let news = req
         .news
         .as_ref()
         .ok_or_else(|| Status::invalid_argument("missing news"))?;
 
-    let old_inputs = parse_snapshot_inputs(olds).map_err(Status::internal)?;
+    let old_inputs = parse_snapshot_inputs(&prev).map_err(Status::internal)?;
     let new_inputs = parse_snapshot_inputs(news).map_err(Status::invalid_argument)?;
 
     let mut replace_keys = Vec::new();

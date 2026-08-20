@@ -95,3 +95,33 @@ impl OutputBuilder {
         prost_struct(self.0)
     }
 }
+
+/// Outputs are the inputs as the user wrote them, plus whatever the service
+/// computed.
+///
+/// A resource's outputs are the contract a stack is written against: if the
+/// schema declares `models` as an output, `${agent.models}` has to resolve. It
+/// is easy to build outputs from only the fields a handler happened to need and
+/// leave the rest silently absent — nothing fails, the reference just yields
+/// nothing.
+///
+/// Echoing the declared inputs verbatim also keeps `Diff` honest on the path
+/// where the engine sends no `old_inputs` and the stored outputs are all there
+/// is to compare against.
+///
+/// `computed` wins on collision, because a value the service assigned is more
+/// authoritative than the one that was requested.
+pub fn with_inputs(
+    props: &prost_types::Struct,
+    input_keys: &[&str],
+    computed: prost_types::Struct,
+) -> prost_types::Struct {
+    let mut fields = std::collections::BTreeMap::new();
+    for key in input_keys {
+        if let Some(v) = props.fields.get(*key) {
+            fields.insert((*key).to_owned(), v.clone());
+        }
+    }
+    fields.extend(computed.fields);
+    prost_types::Struct { fields }
+}

@@ -90,6 +90,52 @@ Found by the plugin's own tests:
 - gRPC message limits were left at tonic's 4 MiB default while the engine and
   language runtime use 512 MiB.
 
+### Fixed after 0.1.0
+
+Found by holding every resource to "deploy, change nothing, preview again":
+
+- `Diff` compared the *outputs* of the last deploy against the *inputs* of the
+  next one, so every computed field — anything the service assigns, any optional
+  input with a default — sat on one side of the comparison and could never
+  appear on the other. Each of those read as a change on every preview, forever.
+  Diffing now uses the engine's `old_inputs`, which exists for exactly this, and
+  falls back to the outputs only for state written before it.
+- `Conversation` made that mistake destructively: its API has no update, so its
+  diff declares a *replace*, and it compared whole structs including `name` and
+  `createTime`. The conversation would have been destroyed and recreated on
+  every deploy.
+- `AgentEngine` and `Memory` had the inverse bug — they compared a subset of
+  their inputs, so editing `env`, `pythonVersion`, `scope`, `displayName` or
+  `description` was reported as nothing to do and silently discarded.
+- A model's detailed diff always named `sql`, whichever property had actually
+  changed. It now names the property that changed.
+
+Found by holding each resource to its own schema:
+
+- `DataAgent` stored eight of its twenty declared outputs. `${agent.models}` —
+  the documented way to ground an agent — resolved to nothing, as did `tables`,
+  `systemInstruction`, `publish`, `labels`, `kmsKey`, `exampleQueries` and
+  `glossaryTerms`. `Memory` was missing `scope`, `displayName` and `description`.
+  Outputs are now the declared inputs as written plus whatever the service
+  computed.
+- `authoritative` was defaulted when writing outputs but not in `Check`, which
+  is where Pulumi expects a provider to fill in the defaults it intends to apply.
+
+Found by deploying the example into a project that already held its tables:
+
+- Adopting an existing table sent `clustering: {"fields": []}`, which BigQuery
+  reads as clustering enabled with nothing to cluster by and rejects. An empty
+  list now clears the field with `null`. The create path had always guarded
+  this; only the adopt path did not, so it failed exactly when a table already
+  existed.
+
+Found by using a documented feature:
+
+- `{{ var('x') }}` and the whole `dbt_utils.*` family were rejected at `Check`
+  as unregistered macros. Both are built-ins the preprocessor resolves itself,
+  which validation did not know — so a project could declare `vars` and no model
+  could use them.
+
 ### Known gaps
 
 - `schemaRelationships` and `userFunctions` are not sent. Both message names

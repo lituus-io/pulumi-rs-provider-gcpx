@@ -44,10 +44,10 @@ pub async fn diff_data_agent<C: DataAgentOps>(
     _client: &C,
     req: pulumirpc::DiffRequest,
 ) -> Result<Response<pulumirpc::DiffResponse>, Status> {
-    let olds = req
-        .olds
-        .as_ref()
-        .ok_or_else(|| Status::invalid_argument("missing olds"))?;
+    let prev =
+        gcpx_core::prost_util::old_inputs_or_outputs(req.old_inputs.as_ref(), req.olds.as_ref())
+            .ok_or_else(|| Status::invalid_argument("missing olds"))?;
+    let olds = &prev;
     let news = req
         .news
         .as_ref()
@@ -100,7 +100,7 @@ pub async fn create_data_agent<C: DataAgentOps>(
     if req.preview {
         return Ok(Response::new(pulumirpc::CreateResponse {
             id,
-            properties: Some(agent_outputs(&inputs, &DataAgentMeta::default())),
+            properties: Some(agent_outputs(props, &inputs, &DataAgentMeta::default())),
             ..Default::default()
         }));
     }
@@ -135,7 +135,7 @@ pub async fn create_data_agent<C: DataAgentOps>(
 
     Ok(Response::new(pulumirpc::CreateResponse {
         id,
-        properties: Some(agent_outputs(&inputs, &meta)),
+        properties: Some(agent_outputs(props, &inputs, &meta)),
         ..Default::default()
     }))
 }
@@ -192,7 +192,7 @@ pub async fn update_data_agent<C: DataAgentOps>(
 
     if req.preview {
         return Ok(Response::new(pulumirpc::UpdateResponse {
-            properties: Some(agent_outputs(&inputs, &DataAgentMeta::default())),
+            properties: Some(agent_outputs(news, &inputs, &DataAgentMeta::default())),
             ..Default::default()
         }));
     }
@@ -211,7 +211,7 @@ pub async fn update_data_agent<C: DataAgentOps>(
         .classify(CA, inputs.project, &req.id)?;
 
     Ok(Response::new(pulumirpc::UpdateResponse {
-        properties: Some(agent_outputs(&inputs, &meta)),
+        properties: Some(agent_outputs(news, &inputs, &meta)),
         ..Default::default()
     }))
 }
@@ -244,19 +244,56 @@ pub async fn check_agent_iam_policy<C: DataAgentOps>(
         let inputs = parse_iam_policy(news).map_err(Status::invalid_argument)?;
         validate::validate_iam_policy(&inputs)
     };
-    build_check_response(req.news, failures)
+
+    // Check is where a provider fills in the defaults it intends to apply, so
+    // that what the engine records as the input is what the provider actually
+    // used. Leaving `authoritative` absent here but writing `false` into the
+    // outputs puts a value on one side of every future comparison and nothing
+    // on the other, which reads as a change on every preview.
+    let mut news = req.news;
+    if let Some(n) = news.as_mut() {
+        n.fields
+            .entry("authoritative".to_owned())
+            .or_insert_with(|| prost_types::Value {
+                kind: Some(prost_types::value::Kind::BoolValue(false)),
+            });
+    }
+    build_check_response(news, failures)
 }
 
 pub async fn diff_agent_iam_policy<C: DataAgentOps>(
     _client: &C,
     req: pulumirpc::DiffRequest,
 ) -> Result<Response<pulumirpc::DiffResponse>, Status> {
-    let olds = req.olds.as_ref();
-    let news = req.news.as_ref();
-    let changed = olds.map(|o| &o.fields) != news.map(|n| &n.fields);
+    // Compare the declared inputs, not the whole struct: the stored outputs
+    // also carry `etag`, which the service issues and no input can match, so a
+    // whole-struct comparison reports a change on every preview forever.
+    let prev =
+        gcpx_core::prost_util::old_inputs_or_outputs(req.old_inputs.as_ref(), req.olds.as_ref());
+    let changed = gcpx_core::prost_util::differing_fields(
+        prev.as_ref(),
+        req.news.as_ref(),
+        &[
+            "project",
+            "location",
+            "agentId",
+            "bindings",
+            "authoritative",
+        ],
+    );
+    let replace: Vec<&str> = changed
+        .iter()
+        .copied()
+        .filter(|k| matches!(*k, "project" | "location" | "agentId"))
+        .collect();
+    let update: Vec<&str> = changed
+        .iter()
+        .copied()
+        .filter(|k| !matches!(*k, "project" | "location" | "agentId"))
+        .collect();
     Ok(build_diff_response(&DiffResult {
-        replace_keys: vec![],
-        update_keys: if changed { vec!["bindings"] } else { vec![] },
+        replace_keys: replace,
+        update_keys: update,
     }))
 }
 
@@ -437,10 +474,20 @@ pub async fn diff_conversation<C: DataAgentOps>(
     _client: &C,
     req: pulumirpc::DiffRequest,
 ) -> Result<Response<pulumirpc::DiffResponse>, Status> {
-    // The API offers no update for a conversation, so any change is a replace.
-    let changed = req.olds.as_ref().map(|o| &o.fields) != req.news.as_ref().map(|n| &n.fields);
+    // The API offers no update for a conversation, so any change is a replace —
+    // which makes comparing the whole struct actively destructive. The stored
+    // outputs carry `name`, `createTime` and `lastUsedTime`, none of which an
+    // input can match, so every preview would destroy and recreate the
+    // conversation. Compare the declared inputs only.
+    let prev =
+        gcpx_core::prost_util::old_inputs_or_outputs(req.old_inputs.as_ref(), req.olds.as_ref());
+    let changed = gcpx_core::prost_util::differing_fields(
+        prev.as_ref(),
+        req.news.as_ref(),
+        &["project", "location", "conversationId", "agents", "labels"],
+    );
     Ok(build_diff_response(&DiffResult {
-        replace_keys: if changed { vec!["agents"] } else { vec![] },
+        replace_keys: changed,
         update_keys: vec![],
     }))
 }
@@ -581,7 +628,32 @@ fn malformed_id(id: &str, expected: &str) -> Status {
     Status::invalid_argument(format!("malformed id '{id}', expected '{expected}'"))
 }
 
-fn agent_outputs(inputs: &DataAgentInputs<'_>, meta: &DataAgentMeta) -> prost_types::Struct {
+/// Every input the schema declares, plus the fields the service assigned.
+const DATA_AGENT_INPUT_KEYS: &[&str] = &[
+    "project",
+    "location",
+    "agentId",
+    "displayName",
+    "description",
+    "labels",
+    "kmsKey",
+    "systemInstruction",
+    "tables",
+    "lookerExplores",
+    "models",
+    "model",
+    "exampleQueries",
+    "glossaryTerms",
+    "chartRendering",
+    "pythonAnalysis",
+    "publish",
+];
+
+fn agent_outputs(
+    props: &prost_types::Struct,
+    inputs: &DataAgentInputs<'_>,
+    meta: &DataAgentMeta,
+) -> prost_types::Struct {
     let name = if meta.name.is_empty() {
         format!(
             "projects/{}/locations/{}/dataAgents/{}",
@@ -596,7 +668,7 @@ fn agent_outputs(inputs: &DataAgentInputs<'_>, meta: &DataAgentMeta) -> prost_ty
     };
     let table_refs: Vec<&str> = tables.iter().map(String::as_str).collect();
 
-    OutputBuilder::new()
+    let computed = OutputBuilder::new()
         .str("project", inputs.project)
         .str("location", inputs.location)
         .str("agentId", inputs.agent_id)
@@ -610,7 +682,8 @@ fn agent_outputs(inputs: &DataAgentInputs<'_>, meta: &DataAgentMeta) -> prost_ty
         // grounded on, which is otherwise buried in the context.
         .str_list("groundedTables", &table_refs)
         .str("datasourceKind", inputs.context.datasources.kind())
-        .build()
+        .build();
+    gcpx_core::output::with_inputs(props, DATA_AGENT_INPUT_KEYS, computed)
 }
 
 fn iam_outputs(inputs: &IamPolicyInputs<'_>, meta: &IamPolicyMeta) -> prost_types::Struct {
@@ -659,40 +732,45 @@ pub async fn diff_agent_engine<C: VertexAgentOps>(
     _client: &C,
     req: pulumirpc::DiffRequest,
 ) -> Result<Response<pulumirpc::DiffResponse>, Status> {
-    let olds = req
-        .olds
-        .as_ref()
-        .ok_or_else(|| Status::invalid_argument("missing olds"))?;
-    let news = req
-        .news
-        .as_ref()
-        .ok_or_else(|| Status::invalid_argument("missing news"))?;
-
-    let mut replace_keys = Vec::new();
-    for key in ["project", "location"] {
-        if gcpx_core::prost_util::get_str(&olds.fields, key)
-            != gcpx_core::prost_util::get_str(&news.fields, key)
-        {
-            replace_keys.push(if key == "project" {
-                "project"
-            } else {
-                "location"
-            });
-        }
+    // Every declared input, not a subset. Omitting one is the quieter failure:
+    // the user edits `env` or `pythonVersion`, the provider reports nothing to
+    // do, and the deployed engine keeps running the old configuration.
+    let prev =
+        gcpx_core::prost_util::old_inputs_or_outputs(req.old_inputs.as_ref(), req.olds.as_ref());
+    if prev.is_none() {
+        return Err(Status::invalid_argument("missing olds"));
     }
-    let mut update_keys = Vec::new();
-    for key in ["displayName", "description", "pickleUri", "requirementsUri"] {
-        if gcpx_core::prost_util::get_str(&olds.fields, key)
-            != gcpx_core::prost_util::get_str(&news.fields, key)
-        {
-            update_keys.push(match key {
-                "displayName" => "displayName",
-                "description" => "description",
-                "pickleUri" => "pickleUri",
-                _ => "requirementsUri",
-            });
-        }
+    if req.news.is_none() {
+        return Err(Status::invalid_argument("missing news"));
     }
+    let changed = gcpx_core::prost_util::differing_fields(
+        prev.as_ref(),
+        req.news.as_ref(),
+        &[
+            "project",
+            "location",
+            "displayName",
+            "description",
+            "pickleUri",
+            "requirementsUri",
+            "dependencyFilesUri",
+            "pythonVersion",
+            "env",
+            "secretEnv",
+        ],
+    );
+    // Project and location are baked into the resource name; the runtime image
+    // cannot be swapped under a running engine either.
+    let replace_keys: Vec<&str> = changed
+        .iter()
+        .copied()
+        .filter(|k| matches!(*k, "project" | "location" | "pythonVersion"))
+        .collect();
+    let update_keys: Vec<&str> = changed
+        .iter()
+        .copied()
+        .filter(|k| !matches!(*k, "project" | "location" | "pythonVersion"))
+        .collect();
     Ok(build_diff_response(&DiffResult {
         replace_keys,
         update_keys,
@@ -918,25 +996,38 @@ pub async fn diff_memory<C: VertexAgentOps>(
     _client: &C,
     req: pulumirpc::DiffRequest,
 ) -> Result<Response<pulumirpc::DiffResponse>, Status> {
-    let olds = req.olds.as_ref();
-    let news = req.news.as_ref();
-    let mut replace_keys = Vec::new();
-    for key in ["project", "location", "engineId"] {
-        if olds.and_then(|o| gcpx_core::prost_util::get_str(&o.fields, key))
-            != news.and_then(|n| gcpx_core::prost_util::get_str(&n.fields, key))
-        {
-            replace_keys.push(match key {
-                "project" => "project",
-                "location" => "location",
-                _ => "engineId",
-            });
-        }
-    }
-    let fact_changed = olds.and_then(|o| gcpx_core::prost_util::get_str(&o.fields, "fact"))
-        != news.and_then(|n| gcpx_core::prost_util::get_str(&n.fields, "fact"));
+    // `scope` is what a memory is retrieved by, and `displayName`/`description`
+    // are what a human identifies it by. Comparing only `fact` meant editing any
+    // of them was silently discarded.
+    let prev =
+        gcpx_core::prost_util::old_inputs_or_outputs(req.old_inputs.as_ref(), req.olds.as_ref());
+    let changed = gcpx_core::prost_util::differing_fields(
+        prev.as_ref(),
+        req.news.as_ref(),
+        &[
+            "project",
+            "location",
+            "engineId",
+            "scope",
+            "fact",
+            "displayName",
+            "description",
+        ],
+    );
+    // Identity and retrieval scope are fixed at creation.
+    let replace_keys: Vec<&str> = changed
+        .iter()
+        .copied()
+        .filter(|k| matches!(*k, "project" | "location" | "engineId" | "scope"))
+        .collect();
+    let update_keys: Vec<&str> = changed
+        .iter()
+        .copied()
+        .filter(|k| !matches!(*k, "project" | "location" | "engineId" | "scope"))
+        .collect();
     Ok(build_diff_response(&DiffResult {
         replace_keys,
-        update_keys: if fact_changed { vec!["fact"] } else { vec![] },
+        update_keys,
     }))
 }
 
@@ -970,7 +1061,7 @@ pub async fn create_memory<C: VertexAgentOps>(
             "{}/{}/{}/{}",
             inputs.project, inputs.location, inputs.engine_id, memory_id
         ),
-        properties: Some(memory_outputs(&inputs, &meta, &memory_id)),
+        properties: Some(memory_outputs(props, &inputs, &meta, &memory_id)),
         ..Default::default()
     }))
 }
@@ -1040,7 +1131,7 @@ pub async fn update_memory<C: VertexAgentOps>(
         .classify(VERTEX, inputs.project, &req.id)?;
 
     Ok(Response::new(pulumirpc::UpdateResponse {
-        properties: Some(memory_outputs(&inputs, &meta, memory_id)),
+        properties: Some(memory_outputs(news, &inputs, &meta, memory_id)),
         ..Default::default()
     }))
 }
@@ -1093,12 +1184,23 @@ fn build_memory_body(inputs: &MemoryInputs<'_>) -> serde_json::Value {
     serde_json::Value::Object(body)
 }
 
+const MEMORY_INPUT_KEYS: &[&str] = &[
+    "project",
+    "location",
+    "engineId",
+    "fact",
+    "scope",
+    "displayName",
+    "description",
+];
+
 fn memory_outputs(
+    props: &prost_types::Struct,
     inputs: &MemoryInputs<'_>,
     meta: &MemoryMeta,
     memory_id: &str,
 ) -> prost_types::Struct {
-    OutputBuilder::new()
+    let computed = OutputBuilder::new()
         .str("project", inputs.project)
         .str("location", inputs.location)
         .str("engineId", inputs.engine_id)
@@ -1107,7 +1209,8 @@ fn memory_outputs(
         .str("fact", inputs.fact)
         .str("createTime", &meta.create_time)
         .str("updateTime", &meta.update_time)
-        .build()
+        .build();
+    gcpx_core::output::with_inputs(props, MEMORY_INPUT_KEYS, computed)
 }
 
 #[cfg(test)]

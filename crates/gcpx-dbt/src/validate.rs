@@ -173,6 +173,17 @@ pub fn validate_max_bytes_billed(max_bytes_billed: Option<i64>) -> Vec<CheckFail
     failures
 }
 
+/// Calls the pipeline resolves itself, which are therefore not user macros.
+///
+/// `var()` is expanded from the project's `vars`, and the `dbt_utils.*` family
+/// is rewritten to BigQuery SQL — both during preprocessing, before macros are
+/// looked up at all. Validation runs against the SQL as written, so without
+/// this it reports every use of a documented built-in as an unregistered macro
+/// and the model cannot deploy.
+fn is_builtin_call(name: &str) -> bool {
+    name == "var" || name.starts_with("dbt_utils.")
+}
+
 pub fn validate_model(
     name: &str,
     sql: &str,
@@ -298,7 +309,7 @@ pub fn validate_model(
             DbtSegment::Call {
                 name: call_name, ..
             } => {
-                if !macros.contains_key(call_name) {
+                if !macros.contains_key(call_name) && !is_builtin_call(call_name) {
                     let available: Vec<&str> = macros.keys().map(|s| s.as_str()).collect();
                     failures.push(CheckFailure {
                         property: "sql".into(),
@@ -688,6 +699,63 @@ pub fn diff_options(
 
 #[cfg(test)]
 mod tests {
+
+    /// `var()` and the `dbt_utils.*` family are resolved by preprocessing, not
+    /// by a user macro. Validation runs against the SQL as written, so it has to
+    /// know that — otherwise every use of a documented built-in is rejected as
+    /// an unregistered macro and the model cannot deploy at all.
+    #[test]
+    fn builtin_calls_are_not_reported_as_unknown_macros() {
+        let ctx = ProjectContext {
+            gcp_project: "p",
+            dataset: "d",
+            sources: BTreeMap::new(),
+            declared_models: vec![],
+            declared_macros: vec![],
+            vars: [("start_date".to_owned(), "'2026-01-01'".to_owned())]
+                .into_iter()
+                .collect(),
+        };
+        let macros = BTreeMap::new();
+        let refs = BTreeMap::new();
+        for sql in [
+            "SELECT 1 WHERE d >= {{ var('start_date') }}",
+            "SELECT {{ dbt_utils.current_timestamp() }} AS now",
+            "SELECT {{ dbt_utils.datediff(a, b, 'day') }} AS gap",
+        ] {
+            let config = empty_config();
+            let failures = validate_model("m", sql, &config, &ctx, &refs, &macros);
+            assert!(
+                !failures.iter().any(|f| f.reason.contains("unknown macro")),
+                "{sql} was rejected: {:?}",
+                failures
+                    .iter()
+                    .map(|f| f.reason.as_ref())
+                    .collect::<Vec<&str>>()
+            );
+        }
+    }
+
+    /// The check still has to catch what it was there for.
+    #[test]
+    fn a_genuinely_unregistered_macro_is_still_reported() {
+        let ctx = ProjectContext {
+            gcp_project: "p",
+            dataset: "d",
+            sources: BTreeMap::new(),
+            declared_models: vec![],
+            declared_macros: vec![],
+            vars: BTreeMap::new(),
+        };
+        let macros = BTreeMap::new();
+        let refs = BTreeMap::new();
+        let sql = "SELECT {{ not_a_builtin('x') }}";
+        let config = empty_config();
+        let failures = validate_model("m", sql, &config, &ctx, &refs, &macros);
+        assert!(failures
+            .iter()
+            .any(|f| f.reason.contains("unknown macro 'not_a_builtin'")));
+    }
 
     /// The one raw shape that can only be a mistake: someone learned the inline
     /// idiom and then moved the SQL into a file, where the wrapper is no longer

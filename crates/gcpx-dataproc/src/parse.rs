@@ -36,8 +36,9 @@ pub fn parse_ingest_inputs(s: &prost_types::Struct) -> Result<IngestJobInputs<'_
     let dest_project = get_str(&s.fields, "destProject");
     let dest_dataset = get_str(&s.fields, "destDataset");
     let dest_table = get_str(&s.fields, "destTable");
-    let image_uri = get_str(&s.fields, "imageUri")
-        .ok_or("missing required field 'imageUri': provide the container image URI")?;
+    // Optional: absent means the stock Dataproc Serverless runtime for the
+    // declared runtimeVersion, which is what most batches want.
+    let image_uri = get_str(&s.fields, "imageUri").unwrap_or("");
     let script_uri = get_str(&s.fields, "scriptUri")
         .ok_or("missing required field 'scriptUri': provide the gs:// path to main.py")?;
     let jar_uris = get_string_list(&s.fields, "jarUris");
@@ -120,8 +121,9 @@ pub fn parse_export_inputs(s: &prost_types::Struct) -> Result<ExportJobInputs<'_
         .ok_or("missing required field 'secret': provide a Secret Manager secret name")?;
     let dest_table = get_str(&s.fields, "destTable")
         .ok_or("missing required field 'destTable': provide the on-prem destination table")?;
-    let image_uri = get_str(&s.fields, "imageUri")
-        .ok_or("missing required field 'imageUri': provide the container image URI")?;
+    // Optional: absent means the stock Dataproc Serverless runtime for the
+    // declared runtimeVersion, which is what most batches want.
+    let image_uri = get_str(&s.fields, "imageUri").unwrap_or("");
     let script_uri = get_str(&s.fields, "scriptUri")
         .ok_or("missing required field 'scriptUri': provide the gs:// path to main.py")?;
     let jar_uris = get_string_list(&s.fields, "jarUris");
@@ -193,7 +195,7 @@ pub fn build_ingest_output(
         .str_opt("destProject", inputs.dest_project)
         .str_opt("destDataset", inputs.dest_dataset)
         .str_opt("destTable", inputs.dest_table)
-        .str("imageUri", inputs.image_uri)
+        .str_opt("imageUri", Some(inputs.image_uri).filter(|u| !u.is_empty()))
         .str("scriptUri", inputs.script_uri)
         .str_list("jarUris", &inputs.jar_uris)
         .str("runtimeVersion", inputs.runtime_version)
@@ -212,6 +214,9 @@ pub fn build_ingest_output(
         .str("schedulerJobName", &state.scheduler_job_name)
         .str("state", &state.state)
         .str("nextRunTime", &state.next_run_time)
+        // Records what the generator produced, so that a later change to the
+        // generator is visible to Diff even when no input has moved.
+        .str("definitionFingerprint", &state.definition_fingerprint)
         .build()
 }
 
@@ -229,7 +234,7 @@ pub fn build_export_output(
         .str("connectionString", inputs.connection_string)
         .str("secret", inputs.secret)
         .str("destTable", inputs.dest_table)
-        .str("imageUri", inputs.image_uri)
+        .str_opt("imageUri", Some(inputs.image_uri).filter(|u| !u.is_empty()))
         .str("scriptUri", inputs.script_uri)
         .str_list("jarUris", &inputs.jar_uris)
         .str("runtimeVersion", inputs.runtime_version)
@@ -248,6 +253,9 @@ pub fn build_export_output(
         .str("schedulerJobName", &state.scheduler_job_name)
         .str("state", &state.state)
         .str("nextRunTime", &state.next_run_time)
+        // Records what the generator produced, so that a later change to the
+        // generator is visible to Diff even when no input has moved.
+        .str("definitionFingerprint", &state.definition_fingerprint)
         .build()
 }
 
@@ -439,6 +447,7 @@ mod tests {
             scheduler_job_name: "sched".to_owned(),
             state: "ENABLED".to_owned(),
             next_run_time: "2026-01-01T00:00:00Z".to_owned(),
+            definition_fingerprint: "fp".to_owned(),
         };
         let output = build_ingest_output(&inputs, &state);
         assert_eq!(get_str(&output.fields, "project"), Some("proj"));
@@ -456,6 +465,7 @@ mod tests {
             scheduler_job_name: "sched".to_owned(),
             state: "ENABLED".to_owned(),
             next_run_time: String::new(),
+            definition_fingerprint: "fp".to_owned(),
         };
         let output = build_export_output(&inputs, &state);
         assert_eq!(get_str(&output.fields, "sourceDataset"), Some("analytics"));

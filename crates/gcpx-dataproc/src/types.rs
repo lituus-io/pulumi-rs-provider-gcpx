@@ -132,6 +132,8 @@ pub struct DataprocJobState {
     pub scheduler_job_name: String,
     pub state: String,
     pub next_run_time: String,
+    /// Fingerprint of the workflow definition this provider generated.
+    pub definition_fingerprint: String,
 }
 
 #[cfg(test)]

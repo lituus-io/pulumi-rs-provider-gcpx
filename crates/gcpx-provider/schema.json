@@ -1478,7 +1478,7 @@
         },
         "imageUri": {
           "type": "string",
-          "description": "Container image URI for the Spark job."
+          "description": "Custom container image URI for the Spark job. Omit to use the stock Dataproc Serverless runtime for the given runtimeVersion."
         },
         "scriptUri": {
           "type": "string",
@@ -1554,7 +1554,6 @@
         "secret",
         "query",
         "destination",
-        "imageUri",
         "scriptUri",
         "serviceAccount",
         "stagingBucket",
@@ -1659,6 +1658,10 @@
         "nextRunTime": {
           "type": "string",
           "description": "Next scheduled run time."
+        },
+        "definitionFingerprint": {
+          "type": "string",
+          "description": "Fingerprint of the Cloud Workflow definition this provider generated. The definition is derived from the inputs rather than declared, so without this a change to how it is generated would be invisible to a diff and a deployed stack would keep running the old one."
         }
       },
       "required": [
@@ -1725,7 +1728,7 @@
         },
         "imageUri": {
           "type": "string",
-          "description": "Container image URI for the Spark job."
+          "description": "Custom container image URI for the Spark job. Omit to use the stock Dataproc Serverless runtime for the given runtimeVersion."
         },
         "scriptUri": {
           "type": "string",
@@ -1802,7 +1805,6 @@
         "connectionString",
         "secret",
         "destTable",
-        "imageUri",
         "scriptUri",
         "serviceAccount",
         "stagingBucket",
@@ -1898,6 +1900,10 @@
         "nextRunTime": {
           "type": "string",
           "description": "Next scheduled run time."
+        },
+        "definitionFingerprint": {
+          "type": "string",
+          "description": "Fingerprint of the Cloud Workflow definition this provider generated. The definition is derived from the inputs rather than declared, so without this a change to how it is generated would be invisible to a diff and a deployed stack would keep running the old one."
         }
       },
       "required": [

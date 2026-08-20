@@ -136,14 +136,47 @@ Found by using a documented feature:
   which validation did not know — so a project could declare `vars` and no model
   could use them.
 
+Found by deploying a Dataproc Serverless batch, which had never been run:
+
+- The generated workflow wrote the batch id as `"name-${short_uuid}"`. Cloud
+  Workflows does not interpolate inside a quoted string — the expression has to
+  be the whole value — so Dataproc received the literal text and rejected every
+  batch for an invalid id. **No batch this provider submitted could ever have
+  started.**
+- `stagingBucket` was passed through as a `gs://` URI. The batches API validates
+  it against a bare bucket-name pattern and rejects a URI. The scheme is now
+  stripped, since every other bucket field on these resources is a path and
+  writing this one as a URI is the natural mistake.
+- `returnOutput` read `body.uuid`, but `batches.create` starts a long-running
+  operation, so the response is an Operation and the uuid is under `metadata`.
+  The execution failed *after* submitting the batch — the work ran, the workflow
+  reported failure, and the scheduler would have retried it.
+- `imageUri` was required. Dataproc Serverless runs the stock runtime for the
+  declared `runtimeVersion` unless a custom image is given, so every job needed
+  an image built and pushed for no reason. It is now optional, and an empty
+  value omits `containerImage` entirely rather than sending `""`, which the API
+  reads as an image reference and rejects.
+- The workflow definition is derived from the inputs and stored nowhere, so a
+  change to how it is generated was invisible to `Diff`: correcting the template
+  left every deployed stack running the old one. A `definitionFingerprint`
+  output now records what the generator produced, and state written without one
+  is treated as stale so a corrected definition reaches existing stacks as a
+  single in-place update.
+
+Verified live: a PySpark batch submitted through `IngestJob` reaches Dataproc
+Serverless, runs, and succeeds, and the stack previews clean afterwards.
+
 ### Known gaps
 
 - `schemaRelationships` and `userFunctions` are not sent. Both message names
   exist, but no accepted subfield spelling could be determined, and an
   unverified shape fails the deploy. This also means BigQuery routines cannot
   yet be wired into an agent as callable functions.
-- Dataproc resources are unverified against a live project; that API was not
-  enabled where the rest was tested.
+- `IngestJob` and `ExportJob` are shaped around a JDBC source or sink: both
+  require a connection string, a Secret Manager secret and a database type, and
+  build a fixed argv for the PySpark script. There is no resource for a plain
+  Spark batch, so running one means supplying those fields and ignoring them in
+  the script.
 
 ### Template layering
 
